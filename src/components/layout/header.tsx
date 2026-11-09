@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Bell, MessageCircle, UserRound } from "lucide-react";
+import { Bell, UserRound } from "lucide-react";
 
 import { FacebookLogo } from "@/components/layout/facebook-logo";
+import { HeaderMessagesLink } from "@/components/layout/header-messages-link";
 
 export function Header() {
   return (
@@ -19,13 +20,7 @@ export function Header() {
         </Link>
 
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-          <span
-            title="Messages"
-            aria-hidden="true"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-600 sm:h-10 sm:w-10"
-          >
-            <MessageCircle className="h-5 w-5" />
-          </span>
+          <HeaderMessagesLink />
           <span
             title="Notifications"
             aria-hidden="true"

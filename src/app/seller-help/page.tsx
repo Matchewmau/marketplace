@@ -28,7 +28,7 @@ const TIPS = [
   {
     icon: Mail,
     title: "Respond by email",
-    body: "Buyers can message you from the listing and see your seller email. Reply from the email you publish with.",
+    body: "Open Messages from the top navigation to read buyer messages. Reply from the email address you publish with.",
   },
 ] as const;
 
@@ -74,9 +74,10 @@ export default function SellerHelpPage() {
             How messaging works
           </h2>
           <p className="mt-1 leading-6">
-            Messages sent from a listing are stored with the listing, and the
-            seller email shown on each listing is where buyers can reach you.
-            No email is sent automatically, so check that inbox for a reply.
+            Messages sent from a listing appear in the Messages inbox, tied to
+            the email you used when posting. Open it with that same email and
+            reply to the buyer&apos;s address. This is browser-local, not an
+            account, and no email is sent automatically.
           </p>
         </div>
 
