@@ -16,7 +16,7 @@ type SidebarProps = {
 
 export function Sidebar({ activeCategory }: SidebarProps) {
   return (
-    <aside className="lg:sticky lg:top-20">
+    <aside className="min-w-0 lg:sticky lg:top-20">
       <div className="hidden rounded-lg bg-white p-4 shadow-sm lg:block">
         <h2 className="mb-3 px-2 text-lg font-semibold text-gray-900">
           Create new listing
@@ -39,7 +39,7 @@ export function Sidebar({ activeCategory }: SidebarProps) {
         <CategoryNav activeCategory={activeCategory} />
       </div>
 
-      <div className="rounded-lg bg-white p-3 shadow-sm lg:hidden">
+      <div className="min-w-0 rounded-lg bg-white p-3 shadow-sm lg:hidden">
         <Button
           asChild
           className="w-full bg-[#1877F2] text-white hover:bg-[#166FE5]"

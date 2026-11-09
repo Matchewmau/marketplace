@@ -103,7 +103,9 @@ export function ListingBrowser({
 
   return (
     <div className="min-w-0 space-y-4">
-      <h1 className="text-2xl font-bold text-gray-900">{heading}</h1>
+      <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">
+        {heading}
+      </h1>
 
       <SearchBar
         value={searchInput}

@@ -85,7 +85,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
 
   if (state.status === "error") {
     return (
-      <div className="rounded-lg bg-white p-10 text-center shadow-sm">
+      <div role="alert" className="rounded-lg bg-white p-10 text-center shadow-sm">
         <p className="text-sm text-red-600">{state.message}</p>
         <Button
           variant="outline"
@@ -141,7 +141,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
 
         <div className="min-w-0 space-y-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="break-words text-2xl font-bold text-gray-900">
               {listing.title}
             </h1>
             <p className="mt-2 text-3xl font-bold text-gray-900">
@@ -160,7 +160,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
 
           <div>
             <h2 className="text-sm font-semibold text-gray-900">Description</h2>
-            <p className="mt-1 whitespace-pre-line text-sm leading-6 text-gray-700">
+            <p className="mt-1 whitespace-pre-line break-words text-sm leading-6 text-gray-700">
               {listing.description ?? "No description provided."}
             </p>
           </div>

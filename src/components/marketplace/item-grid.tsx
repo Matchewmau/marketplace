@@ -24,7 +24,11 @@ export function ItemGrid({
 }: ItemGridProps) {
   if (loading) {
     return (
-      <div className={ITEM_GRID_CLASS} aria-label="Loading listings">
+      <div
+        className={ITEM_GRID_CLASS}
+        aria-label="Loading listings"
+        aria-busy="true"
+      >
         {Array.from({ length: 6 }).map((_, index) => (
           <div
             key={index}
@@ -44,7 +48,10 @@ export function ItemGrid({
 
   if (error) {
     return (
-      <div className="rounded-lg bg-white p-8 text-center shadow-sm">
+      <div
+        role="alert"
+        className="rounded-lg bg-white p-8 text-center shadow-sm"
+      >
         <p className="text-sm text-red-600">{error}</p>
         {onRetry ? (
           <Button variant="outline" className="mt-4" onClick={onRetry}>
@@ -57,7 +64,10 @@ export function ItemGrid({
 
   if (listings.length === 0) {
     return (
-      <div className="rounded-lg bg-white p-10 text-center shadow-sm">
+      <div
+        role="status"
+        className="rounded-lg bg-white p-10 text-center shadow-sm"
+      >
         <p className="text-sm text-gray-600">
           {emptyMessage ?? "No listings yet"}
         </p>
