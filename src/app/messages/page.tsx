@@ -88,6 +88,9 @@ export default function MessagesPage() {
       if (stored && isValidEmail(stored)) {
         setEmail(stored);
         setEmailInput(stored);
+        setMessages([]);
+        setLoading(true);
+        setError(null);
       }
     } catch {
       // localStorage can be unavailable; the email form still works.
@@ -164,6 +167,9 @@ export default function MessagesPage() {
     }
 
     setFormError(null);
+    setMessages([]);
+    setLoading(true);
+    setError(null);
     setEmail(value);
     setFetchVersion((current) => current + 1);
   }
@@ -183,8 +189,10 @@ export default function MessagesPage() {
       <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03] sm:p-6">
         <h1 className="text-2xl font-semibold text-gray-800">Messages</h1>
         <p className="mt-1 text-sm leading-6 text-gray-600">
-          Messages sent to the email you use when posting. This inbox is tied
-          to this browser, not an account.
+          Messages sent to the email you use when posting. The email is
+          remembered in this browser, but anyone who knows it can view these
+          messages from any browser. This is not an account, so do not use it
+          for sensitive messages.
         </p>
 
         <form
@@ -198,21 +206,35 @@ export default function MessagesPage() {
               id="messages-seller-email"
               type="email"
               value={emailInput}
-              onChange={(event) => setEmailInput(event.target.value)}
+              onChange={(event) => {
+                setEmailInput(event.target.value);
+                if (formError) {
+                  setFormError(null);
+                }
+              }}
               placeholder="you@example.com"
               aria-invalid={Boolean(formError)}
+              aria-describedby={
+                formError ? "messages-email-error" : undefined
+              }
             />
           </div>
           <Button
             type="submit"
-            className="bg-[#1877F2] text-white hover:bg-[#166FE5]"
+            className="bg-[#166FE5] text-white hover:bg-[#0F5BBF]"
           >
             View messages
           </Button>
         </form>
 
         {formError ? (
-          <p className="mt-2 text-xs text-red-600">{formError}</p>
+          <p
+            id="messages-email-error"
+            role="alert"
+            className="mt-2 text-xs text-red-600"
+          >
+            {formError}
+          </p>
         ) : null}
 
         {email ? (
@@ -268,7 +290,7 @@ export default function MessagesPage() {
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             <Button
               asChild
-              className="bg-[#1877F2] text-white hover:bg-[#166FE5]"
+              className="bg-[#166FE5] text-white hover:bg-[#0F5BBF]"
             >
               <Link href="/your-listings">View your listings</Link>
             </Button>
@@ -297,7 +319,7 @@ export default function MessagesPage() {
                 <div className="min-w-0 flex-1">
                   <Link
                     href={`/item/${group.listingId}`}
-                    className="block truncate font-medium text-gray-800 transition-colors hover:text-[#1877F2] hover:underline"
+                    className="block truncate font-medium text-gray-800 transition-colors hover:text-[#166FE5] hover:underline"
                   >
                     {group.listingTitle}
                   </Link>
@@ -315,7 +337,7 @@ export default function MessagesPage() {
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                       <a
                         href={`mailto:${message.buyer_email}`}
-                        className="break-all text-sm font-medium text-[#1877F2] hover:underline"
+                        className="break-all text-sm font-medium text-[#166FE5] hover:underline"
                       >
                         {message.buyer_email}
                       </a>

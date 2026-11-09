@@ -133,7 +133,9 @@ npm run start     # Serve the production build
 | `created_at` | `timestamptz` | Defaults to `now()` |
 
 Messages are insert-only through the API. There is intentionally no public
-select policy, so messages cannot be read from the browser.
+select policy, so the public anon key cannot read messages directly. The seller
+inbox reads them server-side through `/api/messages` using the service-role
+key.
 
 ## API
 

@@ -76,8 +76,9 @@ export default function SellerHelpPage() {
           <p className="mt-1 leading-6">
             Messages sent from a listing appear in the Messages inbox, tied to
             the email you used when posting. Open it with that same email and
-            reply to the buyer&apos;s address. This is browser-local, not an
-            account, and no email is sent automatically.
+            reply to the buyer&apos;s address. The email is remembered in this
+            browser, but anyone who knows it can view these messages. This is
+            not an account, and no email is sent automatically.
           </p>
         </div>
 
