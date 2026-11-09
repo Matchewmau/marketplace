@@ -5,6 +5,7 @@ import { ArrowLeft, Mail } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ImageWithFallback } from "@/components/marketplace/image-with-fallback";
+import { MessageSellerForm } from "@/components/marketplace/message-seller-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatLocation, formatPrice, formatRelativeTime } from "@/lib/format";
@@ -181,8 +182,8 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
             <h2 className="mb-2 text-sm font-semibold text-gray-900">
               Message Seller
             </h2>
-            <div className="rounded-md border border-dashed border-gray-300 p-4 text-sm text-gray-500">
-              Message form coming soon.
+            <div className="rounded-md border border-dashed border-gray-300 p-4">
+              <MessageSellerForm listingId={listing.id} />
             </div>
           </div>
         </div>
