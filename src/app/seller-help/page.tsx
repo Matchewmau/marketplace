@@ -43,8 +43,8 @@ export default function SellerHelpPage() {
         Back to Marketplace
       </Link>
 
-      <div className="rounded-lg bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold text-gray-900">Seller help</h1>
+      <div className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-black/[0.03]">
+        <h1 className="text-2xl font-semibold text-gray-800">Seller help</h1>
         <p className="mt-1 text-sm text-gray-600">
           A few tips for a listing that sells.
         </p>
@@ -59,7 +59,7 @@ export default function SellerHelpPage() {
                   <Icon className="h-5 w-5" />
                 </span>
                 <div>
-                  <h2 className="font-semibold text-gray-900">{tip.title}</h2>
+                  <h2 className="font-medium text-gray-800">{tip.title}</h2>
                   <p className="mt-0.5 text-sm leading-6 text-gray-600">
                     {tip.body}
                   </p>
@@ -70,7 +70,7 @@ export default function SellerHelpPage() {
         </ul>
 
         <div className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
-          <h2 className="font-semibold text-gray-900">
+          <h2 className="font-medium text-gray-800">
             How messaging works
           </h2>
           <p className="mt-1 leading-6">

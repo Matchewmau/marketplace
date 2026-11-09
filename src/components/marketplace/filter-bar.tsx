@@ -10,9 +10,13 @@ import {
 import { CONDITIONS } from "@/lib/conditions";
 import type { FilterState, SortOption } from "@/lib/types";
 
+type FilterChangeOptions = {
+  debounce?: boolean;
+};
+
 type FilterBarProps = {
   filters: FilterState;
-  onChange: (next: FilterState) => void;
+  onChange: (next: FilterState, options?: FilterChangeOptions) => void;
   onClear: () => void;
 };
 
@@ -25,8 +29,17 @@ function update(
 }
 
 export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
+  const hasActiveFilters =
+    Boolean(
+      filters.search ||
+        filters.minPrice ||
+        filters.maxPrice ||
+        filters.condition ||
+        filters.location,
+    ) || filters.sort !== "newest";
+
   return (
-    <div className="rounded-lg bg-white p-3 shadow-sm">
+    <div className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-black/[0.03]">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 sm:w-28">
           Min price
@@ -36,7 +49,9 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
             step="0.01"
             value={filters.minPrice}
             onChange={(event) =>
-              onChange(update(filters, "minPrice", event.target.value))
+              onChange(update(filters, "minPrice", event.target.value), {
+                debounce: true,
+              })
             }
             placeholder="0"
             className="bg-white"
@@ -51,7 +66,9 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
             step="0.01"
             value={filters.maxPrice}
             onChange={(event) =>
-              onChange(update(filters, "maxPrice", event.target.value))
+              onChange(update(filters, "maxPrice", event.target.value), {
+                debounce: true,
+              })
             }
             placeholder="Any"
             className="bg-white"
@@ -86,7 +103,9 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
             type="text"
             value={filters.location}
             onChange={(event) =>
-              onChange(update(filters, "location", event.target.value))
+              onChange(update(filters, "location", event.target.value), {
+                debounce: true,
+              })
             }
             placeholder="City or area"
             className="bg-white"
@@ -116,9 +135,10 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
           type="button"
           variant="ghost"
           onClick={onClear}
+          disabled={!hasActiveFilters}
           className="text-gray-600 sm:mb-0"
         >
-          Clear
+          Clear filters
         </Button>
       </div>
     </div>

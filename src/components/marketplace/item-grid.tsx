@@ -32,7 +32,7 @@ export function ItemGrid({
         {Array.from({ length: 6 }).map((_, index) => (
           <div
             key={index}
-            className="overflow-hidden rounded-lg bg-white shadow-sm"
+            className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.03]"
           >
             <div className="aspect-square animate-pulse bg-gray-200" />
             <div className="space-y-2 p-3">
@@ -50,7 +50,7 @@ export function ItemGrid({
     return (
       <div
         role="alert"
-        className="rounded-lg bg-white p-8 text-center shadow-sm"
+        className="rounded-xl bg-white p-8 text-center shadow-sm ring-1 ring-black/[0.03]"
       >
         <p className="text-sm text-red-600">{error}</p>
         {onRetry ? (
@@ -66,7 +66,7 @@ export function ItemGrid({
     return (
       <div
         role="status"
-        className="rounded-lg bg-white p-10 text-center shadow-sm"
+        className="rounded-xl bg-white p-10 text-center shadow-sm ring-1 ring-black/[0.03]"
       >
         <p className="text-sm text-gray-600">
           {emptyMessage ?? "No listings yet"}

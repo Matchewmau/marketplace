@@ -56,7 +56,7 @@ export default function YourListingsPage() {
     <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-6">
       <Sidebar />
       <div className="min-w-0 space-y-4">
-        <div className="rounded-lg bg-white p-4 shadow-sm">
+        <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03]">
           <p className="text-sm text-gray-600">
             Your listings are tied to the email you use when posting. This
             is browser-local, not an account.
@@ -106,12 +106,12 @@ export default function YourListingsPage() {
               emptyMessage="No listings for this email"
             />
           ) : (
-            <div className="rounded-lg bg-white p-8 text-center text-sm text-gray-600 shadow-sm">
+            <div className="rounded-xl bg-white p-8 text-center text-sm text-gray-600 shadow-sm ring-1 ring-black/[0.03]">
               Enter your email to see listings you created in this browser.
             </div>
           )
         ) : (
-          <div className="rounded-lg bg-white p-8 text-center text-sm text-gray-500 shadow-sm">
+          <div className="rounded-xl bg-white p-8 text-center text-sm text-gray-500 shadow-sm ring-1 ring-black/[0.03]">
             Loading your listings…
           </div>
         )}

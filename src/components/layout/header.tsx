@@ -13,7 +13,7 @@ export function Header() {
           className="flex min-w-0 items-center gap-2"
         >
           <FacebookLogo />
-          <span className="truncate text-lg font-bold text-gray-900 sm:text-xl">
+          <span className="truncate text-lg font-semibold text-gray-800 sm:text-xl">
             Marketplace
           </span>
         </Link>

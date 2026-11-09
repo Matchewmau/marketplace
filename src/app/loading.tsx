@@ -4,7 +4,7 @@ const SKELETON_GRID_CLASS =
 export default function Loading() {
   return (
     <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-6">
-      <div className="hidden rounded-lg bg-white p-4 shadow-sm lg:block">
+      <div className="hidden rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03] lg:block">
         <div className="h-6 w-40 animate-pulse rounded bg-gray-200" />
         <div className="mt-4 space-y-2">
           {Array.from({ length: 3 }).map((_, index) => (
@@ -33,7 +33,7 @@ export default function Loading() {
           {Array.from({ length: 6 }).map((_, index) => (
             <div
               key={index}
-              className="overflow-hidden rounded-lg bg-white shadow-sm"
+              className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.03]"
             >
               <div className="aspect-square animate-pulse bg-gray-200" />
               <div className="space-y-2 p-3">

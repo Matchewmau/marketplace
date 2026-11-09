@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { FilterBar } from "@/components/marketplace/filter-bar";
 import { ItemGrid } from "@/components/marketplace/item-grid";
 import { SearchBar } from "@/components/marketplace/search-bar";
 import type { FilterState, Listing } from "@/lib/types";
+
+const FILTER_DEBOUNCE_MS = 350;
+
+type FilterChangeOptions = {
+  debounce?: boolean;
+};
 
 type ListingBrowserProps = {
   category?: string;
@@ -32,28 +39,58 @@ export function ListingBrowser({
   emptyMessage,
 }: ListingBrowserProps) {
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] =
+    useState<FilterState>(EMPTY_FILTERS);
   const [searchInput, setSearchInput] = useState("");
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fetchVersion, setFetchVersion] = useState(0);
+  const hasLoadedRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    const isInitialLoad = !hasLoadedRef.current;
 
-    setLoading(true);
+    if (isInitialLoad) {
+      setLoading(true);
+    } else {
+      setUpdating(true);
+    }
     setError(null);
 
-    const timer = setTimeout(async () => {
+    async function load() {
       try {
         const params = new URLSearchParams();
 
-        if (filters.search) params.set("search", filters.search);
-        if (filters.minPrice) params.set("minPrice", filters.minPrice);
-        if (filters.maxPrice) params.set("maxPrice", filters.maxPrice);
-        if (filters.condition) params.set("condition", filters.condition);
-        if (filters.location) params.set("location", filters.location);
-        if (filters.sort) params.set("sort", filters.sort);
+        if (appliedFilters.search) {
+          params.set("search", appliedFilters.search);
+        }
+        if (appliedFilters.minPrice) {
+          params.set("minPrice", appliedFilters.minPrice);
+        }
+        if (appliedFilters.maxPrice) {
+          params.set("maxPrice", appliedFilters.maxPrice);
+        }
+        if (appliedFilters.condition) {
+          params.set("condition", appliedFilters.condition);
+        }
+        if (appliedFilters.location) {
+          params.set("location", appliedFilters.location);
+        }
+        if (appliedFilters.sort) {
+          params.set("sort", appliedFilters.sort);
+        }
         if (category) params.set("category", category);
         if (sellerEmail) params.set("sellerEmail", sellerEmail);
 
@@ -70,6 +107,7 @@ export function ListingBrowser({
         }
 
         setListings(data?.listings ?? []);
+        hasLoadedRef.current = true;
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
@@ -78,22 +116,49 @@ export function ListingBrowser({
         setError(
           err instanceof Error ? err.message : "Failed to load listings",
         );
-        setListings([]);
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
+          setUpdating(false);
         }
       }
-    }, 300);
+    }
 
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [filters, category, sellerEmail, fetchVersion]);
+    load();
+
+    return () => controller.abort();
+  }, [appliedFilters, category, sellerEmail, fetchVersion]);
+
+  function scheduleFilters(
+    next: FilterState,
+    options: FilterChangeOptions = {},
+  ) {
+    setFilters(next);
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+
+    if (options.debounce) {
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        setAppliedFilters(next);
+      }, FILTER_DEBOUNCE_MS);
+      return;
+    }
+
+    setAppliedFilters(next);
+  }
 
   function clearFilters() {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+
     setFilters(EMPTY_FILTERS);
+    setAppliedFilters(EMPTY_FILTERS);
     setSearchInput("");
   }
 
@@ -103,23 +168,43 @@ export function ListingBrowser({
 
   return (
     <div className="min-w-0 space-y-4">
-      <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">
-        {heading}
-      </h1>
+      <div className="flex min-h-6 flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold text-gray-800 sm:text-2xl">
+          {heading}
+        </h1>
+        {updating ? (
+          <p
+            role="status"
+            aria-live="polite"
+            className="inline-flex items-center gap-1.5 text-xs text-gray-500"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Updating results…
+          </p>
+        ) : !loading && !error ? (
+          <p className="text-xs text-gray-500" aria-live="polite">
+            {listings.length} {listings.length === 1 ? "listing" : "listings"}
+          </p>
+        ) : null}
+      </div>
 
       <SearchBar
         value={searchInput}
         onChange={setSearchInput}
         onSubmit={() =>
-          setFilters((current) => ({
-            ...current,
+          scheduleFilters({
+            ...filters,
             search: searchInput.trim(),
-          }))
+          })
         }
       />
 
       {showFilters ? (
-        <FilterBar filters={filters} onChange={setFilters} onClear={clearFilters} />
+        <FilterBar
+          filters={filters}
+          onChange={scheduleFilters}
+          onClear={clearFilters}
+        />
       ) : null}
 
       <ItemGrid

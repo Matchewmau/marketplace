@@ -12,7 +12,7 @@ export function ItemCard({ listing }: ItemCardProps) {
   return (
     <Link
       href={`/item/${listing.id}`}
-      className="group block overflow-hidden rounded-lg bg-white shadow-sm transition-shadow hover:shadow-md"
+      className="group block overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.03] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
     >
       <div className="relative aspect-square overflow-hidden bg-gray-100">
         <ImageWithFallback
@@ -20,17 +20,17 @@ export function ItemCard({ listing }: ItemCardProps) {
           alt={listing.title}
           fill
           sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-          className="object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+          className="object-cover transition-transform duration-300 group-hover:scale-[1.025]"
         />
       </div>
-      <div className="p-3">
-        <p className="text-lg font-bold text-gray-900">
+      <div className="p-3.5">
+        <p className="text-[17px] font-semibold leading-6 text-gray-800">
           {formatPrice(listing.price)}
         </p>
-        <h3 className="mt-0.5 line-clamp-2 text-sm text-gray-800">
+        <h3 className="mt-0.5 line-clamp-2 text-sm leading-5 text-gray-700">
           {listing.title}
         </h3>
-        <p className="mt-1 truncate text-xs text-gray-500">
+        <p className="mt-1.5 truncate text-xs text-gray-500">
           {formatRelativeTime(listing.created_at)} ·{" "}
           {formatLocation(listing.location)}
         </p>

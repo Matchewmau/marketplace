@@ -258,9 +258,9 @@ export function CreateListingForm({
       <form
         onSubmit={handleSubmit}
         noValidate
-        className="min-w-0 space-y-5 rounded-lg bg-white p-4 shadow-sm sm:p-6"
+        className="min-w-0 space-y-5 rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03] sm:p-6"
       >
-        <h1 className="text-2xl font-bold text-gray-900">Create listing</h1>
+        <h1 className="text-2xl font-semibold text-gray-800">Create listing</h1>
 
         {bannerError ? (
           <div
@@ -463,10 +463,10 @@ export function CreateListingForm({
             )}
           </div>
           <div className="space-y-2 p-4">
-            <h2 className="line-clamp-2 text-lg font-semibold text-gray-900">
+            <h2 className="line-clamp-2 text-lg font-semibold text-gray-800">
               {previewTitle}
             </h2>
-            <p className="text-2xl font-bold text-gray-900">
+            <p className="text-2xl font-semibold text-gray-800">
               {previewPrice(price)}
             </p>
             <Badge variant="outline">{condition}</Badge>
