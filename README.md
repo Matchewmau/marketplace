@@ -6,7 +6,7 @@ browse and search listings, filter by category, price, condition, location, and
 sort order, open a listing, and send a message to the seller. Sellers read those
 messages in an email-keyed inbox.
 
-**Live demo:** _Add the deployed Vercel URL here after deployment._
+**Live demo:** [marketplace-ten-silk-78.vercel.app](https://marketplace-ten-silk-78.vercel.app)
 
 ## Features
 
