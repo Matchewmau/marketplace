@@ -4,7 +4,7 @@ import { isCategoryName } from "@/lib/categories";
 import { isCondition } from "@/lib/conditions";
 import { supabase } from "@/lib/supabase";
 import type { Listing, SortOption } from "@/lib/types";
-import { sanitizeFilterTerm } from "@/lib/validation";
+import { sanitizeFilterTerm, validateListingInput } from "@/lib/validation";
 
 const SORT_OPTIONS: SortOption[] = ["newest", "price_asc", "price_desc"];
 
@@ -28,6 +28,50 @@ function parsePrice(value: string | null, name: string): PriceResult {
   }
 
   return { ok: true, value: amount };
+}
+
+export async function POST(request: Request) {
+  let body: unknown;
+
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid listing data." },
+      { status: 400 },
+    );
+  }
+
+  const result = validateListingInput(body);
+
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("listings")
+      .insert(result.value)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      return NextResponse.json(
+        { error: "Failed to create listing" },
+        { status: 500 },
+      );
+    }
+
+    const row = data as ListingRow;
+    const listing = { ...row, price: Number(row.price) } as Listing;
+
+    return NextResponse.json({ listing }, { status: 201 });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to create listing" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function GET(request: Request) {
