@@ -3,7 +3,8 @@
 A Facebook Marketplace–inspired buying and selling app built for the Notion
 “Test 3: Marketplace” challenge. Visitors can create a listing with a photo,
 browse and search listings, filter by category, price, condition, location, and
-sort order, open a listing, and send a message to the seller.
+sort order, open a listing, and send a message to the seller. Sellers read those
+messages in an email-keyed inbox.
 
 **Live demo:** _Add the deployed Vercel URL here after deployment._
 
@@ -23,6 +24,8 @@ sort order, open a listing, and send a message to the seller.
 - Listing detail page with image, price, condition, category, description,
   seller email, and a message form.
 - Message seller flow that stores messages in Supabase. No email is sent.
+- Seller inbox at `/messages`, opened from the header message icon, grouped by
+  listing with buyer email links and relative timestamps.
 - “Your listings” view scoped to the email saved in this browser.
 - Loading skeletons, empty states, error retry, and a custom not-found page.
 
@@ -47,7 +50,7 @@ npm install
 
 ### 2. Configure environment variables
 
-Copy the example file and fill in your Supabase publishable key:
+Copy the example file and fill in your Supabase keys:
 
 ```bash
 cp .env.local.example .env.local
@@ -56,10 +59,14 @@ cp .env.local.example .env.local
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-publishable-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-The publishable/anon key is safe for browser use. Never expose a service-role
-key through `NEXT_PUBLIC_*` variables.
+The publishable/anon key is safe for browser use. `SUPABASE_SERVICE_ROLE_KEY`
+is server-only, used exclusively by the messages inbox route, and may hold
+either the legacy service-role key or the newer `sb_secret_...` key. Never
+prefix it with `NEXT_PUBLIC_`, never commit it, and keep `.env.local` out of
+git.
 
 ### 3. Set up Supabase
 
@@ -136,7 +143,8 @@ select policy, so messages cannot be read from the browser.
 | `POST` | `/api/listings` | Create a listing. Body: `title`, `description`, `price`, `category`, `condition`, `seller_email`, `image_url`, `location`. Returns `201 { listing }`. |
 | `GET` | `/api/listings/[id]` | Fetch one listing. Returns `{ listing }`, or `404` for an invalid or missing id. |
 | `POST` | `/api/upload` | Multipart form-data with `file` (JPEG, PNG, or WebP, max 4 MB). Returns `201 { url }`. |
-| `POST` | `/api/messages` | Send a message. Body: `listing_id`, `buyer_email`, `message`. Returns `201 { message }`, `400` on validation failure, or `404` when the listing is missing. |
+| `GET` | `/api/messages` | Seller inbox. Query param: `sellerEmail`. Returns `{ messages }`, newest first, capped at 100, with listing title, image, and price. `400` for a missing or invalid email; `500` when the service-role key is absent or Supabase fails. |
+| `POST` | `/api/messages` | Send a message. Body: `listing_id`, `buyer_email`, `message`. Returns `201 { message }`, `400` on validation failure, or `404` when the listing is missing. Messages appear in the seller inbox but no automatic email is sent. |
 
 Validation errors return `{ error: string }` with status `400`. Storage or
 database failures return `500`.
@@ -145,9 +153,12 @@ database failures return `500`.
 
 1. Push the repository to GitHub.
 2. Import the repository in Vercel.
-3. Add the environment variables `NEXT_PUBLIC_SUPABASE_URL` and
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the Production environment.
+3. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
+   `SUPABASE_SERVICE_ROLE_KEY` to Production, Preview, and Development.
 4. Deploy. Pushing to `main` triggers a new production deployment.
+5. Smoke-test the deployment: browse and search, create a listing with a photo,
+   send a message, then read it in `/messages` using that listing’s seller
+   email. Confirm the service-role key never appears in the browser bundle.
 
 ## Known limitations
 
@@ -155,8 +166,13 @@ database failures return `500`.
 - “Your listings” is browser-local: it remembers the seller email in
   `localStorage` under `marketplace_seller_email`, so it does not sync across
   devices or browsers.
-- Messages are stored in Supabase, but no email is delivered. The seller email
-  is shown on the listing for direct contact.
+- Messages are stored in Supabase and read through an email-keyed seller inbox;
+  no automatic email notification is sent.
+- There are no accounts. The inbox is keyed by the seller email and is not
+  secure authentication: anyone who knows a seller email can view that inbox.
+  Do not use it for sensitive messages.
+- The public anon key still cannot read the `messages` table; inbox reads use a
+  server-only service-role key inside the API route.
 - No radius/distance filtering and no pagination; results are capped at 100.
 - The app does not edit or delete listings.
 - Free Supabase projects pause after a period of inactivity, which can make the
@@ -171,13 +187,15 @@ src/
     category/[slug] # category pages
     create/         # choose type and create item
     item/[id]       # listing detail
+    messages/       # seller inbox
     seller-help/
     your-listings/
   components/
     layout/         # header, sidebar, logo
     marketplace/    # cards, grid, browser, filters, forms, detail
     ui/             # shadcn/ui primitives
-  lib/              # categories, conditions, formatting, validation, image
+  lib/              # categories, conditions, formatting, validation, image,
+                    # Supabase clients (supabase-admin.ts is server-only)
 supabase/
   migrations/       # schema, policies, bucket, trigger
   seed.sql          # 12 sample listings
