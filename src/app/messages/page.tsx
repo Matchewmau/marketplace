@@ -189,6 +189,7 @@ export default function MessagesPage() {
 
         <form
           onSubmit={handleSubmit}
+          noValidate
           className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end"
         >
           <div className="min-w-0 flex-1 space-y-1.5 sm:max-w-sm">
