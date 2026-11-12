@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isTrustedStripeUrl } from "@/lib/stripe/redirect";
-import type { SellerPaymentStatus } from "@/lib/types";
+import type { PublicSellerStatus } from "@/lib/types";
 import { isValidEmail } from "@/lib/validation";
 
 const STORAGE_KEY = "marketplace_seller_email";
@@ -23,7 +23,7 @@ const ERROR_ID = "payments-seller-email-error";
 
 type ApiResponse = {
   url?: string;
-  status?: SellerPaymentStatus | null;
+  status?: PublicSellerStatus | null;
   error?: string;
 };
 
@@ -50,7 +50,7 @@ export function SellerPaymentsPanel() {
   const onboarding = searchParams.get("onboarding");
 
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<SellerPaymentStatus | null | undefined>(
+  const [status, setStatus] = useState<PublicSellerStatus | null | undefined>(
     undefined,
   );
   const [pending, setPending] = useState(false);

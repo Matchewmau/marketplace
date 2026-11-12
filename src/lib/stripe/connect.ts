@@ -1,14 +1,19 @@
 import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { SellerPaymentStatus } from "@/lib/types";
+import type { PublicSellerStatus, SellerPaymentStatus } from "@/lib/types";
 
 export const ACCOUNT_INCLUDE: ReadonlyArray<Stripe.V2.Core.AccountRetrieveParams.Include> = [
   "configuration.recipient",
   "requirements",
 ];
 
-/** Maps an Accounts v2 recipient account onto the flags stored in seller_accounts. */
+/**
+ * Maps an Accounts v2 recipient account onto the flags stored in seller_accounts.
+ * details_submitted means the seller has nothing left to do right now: transfers are
+ * active or pending (Stripe may still be verifying) and no currently/past-due requirement
+ * is awaiting action from the user. v2 responses use null for unset fields.
+ */
 export function normalizeAccountStatus(
   account: Stripe.V2.Core.Account,
 ): Omit<SellerPaymentStatus, "stripe_account_id"> {
@@ -18,18 +23,21 @@ export function normalizeAccountStatus(
   }
 
   const stripeBalance = recipient.capabilities?.stripe_balance;
-  const chargesEnabled = stripeBalance?.stripe_transfers?.status === "active";
+  const transfersStatus = stripeBalance?.stripe_transfers?.status;
+  const chargesEnabled = transfersStatus === "active";
 
   const requirements = account.requirements;
   const detailsSubmitted =
-    requirements !== undefined &&
+    requirements != null &&
+    (transfersStatus === "active" || transfersStatus === "pending") &&
     !(requirements.entries ?? []).some((entry) => {
+      if (entry.awaiting_action_from !== "user") return false;
       const status = entry.minimum_deadline?.status;
       return status === "currently_due" || status === "past_due";
     });
 
   const payouts = stripeBalance?.payouts;
-  const payoutsEnabled = payouts
+  const payoutsEnabled = payouts != null
     ? payouts.status === "active"
     : chargesEnabled && detailsSubmitted;
 
@@ -56,7 +64,7 @@ export async function createSellerAccount(stripe: Stripe, email: string): Promis
     },
     metadata: { seller_email: email },
     include: [...ACCOUNT_INCLUDE],
-  });
+  }, { idempotencyKey: `seller-account:${email}` });
   return account.id;
 }
 
@@ -78,7 +86,10 @@ export async function createOnboardingLink(
   return link.url;
 }
 
-/** Re-reads the seller's account from Stripe and persists the flags. Null if the email has no account. */
+/**
+ * Re-reads the seller's account from Stripe and persists the flags. Null if the email has no account.
+ * details_submitted is sticky: once true it never flips back, so onboarding links stay closed.
+ */
 export async function refreshSellerAccount(
   stripe: Stripe,
   admin: SupabaseClient,
@@ -86,7 +97,7 @@ export async function refreshSellerAccount(
 ): Promise<SellerPaymentStatus | null> {
   const { data, error } = await admin
     .from("seller_accounts")
-    .select("stripe_account_id")
+    .select("stripe_account_id, details_submitted")
     .eq("seller_email", email)
     .maybeSingle();
 
@@ -95,11 +106,16 @@ export async function refreshSellerAccount(
   }
   if (!data) return null;
 
-  const stripeAccountId = (data as { stripe_account_id: string }).stripe_account_id;
+  const previous = data as { stripe_account_id: string; details_submitted: boolean | null };
+  const stripeAccountId = previous.stripe_account_id;
   const account = await stripe.v2.core.accounts.retrieve(stripeAccountId, {
     include: [...ACCOUNT_INCLUDE],
   });
-  const flags = normalizeAccountStatus(account);
+  const fresh = normalizeAccountStatus(account);
+  const flags = {
+    ...fresh,
+    details_submitted: previous.details_submitted === true || fresh.details_submitted,
+  };
 
   const { error: updateError } = await admin
     .from("seller_accounts")
@@ -111,4 +127,29 @@ export async function refreshSellerAccount(
   }
 
   return { stripe_account_id: stripeAccountId, ...flags };
+}
+
+/** Drops the stripe_account_id before a status is returned from a public route. */
+export function toPublicSellerStatus(status: SellerPaymentStatus): PublicSellerStatus {
+  return {
+    charges_enabled: status.charges_enabled,
+    payouts_enabled: status.payouts_enabled,
+    details_submitted: status.details_submitted,
+  };
+}
+
+/** Removes the binding for an email whose connected account no longer exists in Stripe. */
+export async function unbindSellerAccount(admin: SupabaseClient, email: string): Promise<void> {
+  const { error } = await admin.from("seller_accounts").delete().eq("seller_email", email);
+  if (error) {
+    throw new Error(`Failed to unbind seller account: ${error.message}`);
+  }
+}
+
+const SECRET_PATTERN = /\b(?:sk|rk|pk|whsec)_[A-Za-z0-9_*]+/g;
+
+/** Error message safe for server logs: never the full error object, with key-like tokens redacted. */
+export function safeErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(SECRET_PATTERN, "[redacted]");
 }

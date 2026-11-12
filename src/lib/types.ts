@@ -41,5 +41,6 @@ export type FilterState = {
 };
 
 export type SellerPaymentStatus = { stripe_account_id: string; charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean };
+export type PublicSellerStatus = Omit<SellerPaymentStatus, "stripe_account_id">;
 export type PurchaseBlockReason = "free" | "below_minimum" | "above_maximum" | "sold" | "reserved" | "seller_not_onboarded" | "payments_unavailable";
 export type PurchaseState = { buyable: true; amountCents: number } | { buyable: false; reason: PurchaseBlockReason };

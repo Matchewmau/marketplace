@@ -1,3 +1,4 @@
+import Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getStripe } from "@/lib/stripe/server";
@@ -40,6 +41,14 @@ function fakeAdmin(rows: Row[]) {
         update: (patch: Partial<Row>) => ({
           eq: async (column: keyof Row, value: string) => {
             for (const r of rows) if (r[column] === value) Object.assign(r, patch);
+            return { error: null };
+          },
+        }),
+        delete: () => ({
+          eq: async (column: keyof Row, value: string) => {
+            for (let i = rows.length - 1; i >= 0; i--) {
+              if (rows[i][column] === value) rows.splice(i, 1);
+            }
             return { error: null };
           },
         }),
@@ -119,15 +128,49 @@ describe("GET /api/stripe/connect/status", () => {
 
     expect(res.status).toBe(200);
     const expected = {
-      stripe_account_id: "acct_known",
       charges_enabled: true,
       payouts_enabled: false,
       details_submitted: true,
     };
-    expect(await res.json()).toEqual({ status: expected });
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({ status: expected });
+    expect(text).not.toContain("stripe_account_id");
+    expect(text).not.toContain("acct_known");
     expect(retrieve).toHaveBeenCalledWith("acct_known", {
       include: ["configuration.recipient", "requirements"],
     });
-    expect(rows[0]).toEqual({ seller_email: "seller@example.com", ...expected });
+    expect(rows[0]).toEqual({
+      seller_email: "seller@example.com",
+      stripe_account_id: "acct_known",
+      ...expected,
+    });
+  });
+
+  it("unbinds the email and returns a null status when the account no longer exists", async () => {
+    const rows: Row[] = [
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_gone",
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: false,
+      },
+    ];
+    vi.mocked(getSupabaseAdmin).mockReturnValue(
+      fakeAdmin(rows) as unknown as ReturnType<typeof getSupabaseAdmin>,
+    );
+    retrieve.mockRejectedValue(
+      new Stripe.errors.StripeInvalidRequestError({
+        code: "resource_missing",
+        message: "No such account",
+        type: "invalid_request_error",
+      }),
+    );
+
+    const res = await GET(get("seller@example.com"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: null });
+    expect(rows).toEqual([]);
   });
 });
