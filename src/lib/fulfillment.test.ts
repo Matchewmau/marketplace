@@ -250,6 +250,22 @@ describe("fulfillCheckoutSession", () => {
     expect(refundCreate).not.toHaveBeenCalled();
   });
 
+  it("never refunds another developer's session when both use the default local Supabase", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
+    vi.stubEnv("APP_SCOPE", "");
+    retrieve.mockResolvedValue(
+      session({
+        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "127.0.0.1:54321" },
+      }),
+    );
+    const { admin, rpcCalls, listingQueries } = fakeAdmin([], { listingExists: false });
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result.outcome).toBe("ignored");
+    expect(listingQueries).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+    expect(refundCreate).not.toHaveBeenCalled();
+  });
+
   it("refunds without recording an order when the listing was deleted", async () => {
     const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"], { listingExists: false });
     const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });

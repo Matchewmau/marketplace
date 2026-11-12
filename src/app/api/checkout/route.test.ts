@@ -73,4 +73,26 @@ describe("POST /api/checkout", () => {
       HOLD,
     );
   });
+
+  it("returns buyers to the request origin even when APP_URL differs", async () => {
+    vi.stubEnv("APP_URL", "https://other.example");
+    vi.mocked(createCheckoutForListing).mockResolvedValue({
+      ok: true,
+      url: "https://checkout.stripe.com/c/pay/cs_test_2",
+      holdToken: HOLD,
+    });
+    const req = new Request("https://shop-git-preview.vercel.app/api/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listingId: LISTING_ID }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(createCheckoutForListing).toHaveBeenCalledWith(
+      LISTING_ID,
+      "https://shop-git-preview.vercel.app",
+      expect.anything(),
+      undefined,
+    );
+  });
 });

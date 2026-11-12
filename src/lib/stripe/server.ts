@@ -34,3 +34,8 @@ export function getAppOrigin(request: Request, env: NodeJS.ProcessEnv = process.
   }
   return new URL(request.url).origin;
 }
+
+/** Origin the request was made from. Checkout returns buyers here so per-origin storage still works. */
+export function getRequestOrigin(request: Request): string {
+  return new URL(request.url).origin;
+}
