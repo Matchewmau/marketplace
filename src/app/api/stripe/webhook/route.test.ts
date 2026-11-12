@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
@@ -33,6 +33,8 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_x");
   vi.stubEnv("STRIPE_WEBHOOK_SECRET", SECRET);
+  vi.stubEnv("APP_SCOPE", "");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://xyz.supabase.co");
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.mocked(getSupabaseAdmin).mockReset();
   vi.mocked(getSupabaseAdmin).mockReturnValue({} as ReturnType<typeof getSupabaseAdmin>);
@@ -42,6 +44,10 @@ beforeEach(() => {
     listingId: null,
     amountCents: 1999,
   });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/stripe/webhook", () => {
@@ -73,6 +79,20 @@ describe("POST /api/stripe/webhook", () => {
     const signature = signer.webhooks.generateTestHeaderString({ payload, secret: SECRET });
     const res = await POST(post(payload, signature));
     expect(res.status).toBe(503);
+    expect(fulfillCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no Supabase URL", "", ""],
+    ["a local Supabase without APP_SCOPE", "", "http://127.0.0.1:54321"],
+    ["an invalid APP_SCOPE", "-bad scope", "https://xyz.supabase.co"],
+  ])("returns 503 without handling when the app scope is unavailable (%s)", async (_label, scope, url) => {
+    vi.stubEnv("APP_SCOPE", scope);
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", url);
+    const signature = signer.webhooks.generateTestHeaderString({ payload, secret: SECRET });
+    const res = await POST(post(payload, signature));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "Payments are not configured." });
     expect(fulfillCheckoutSession).not.toHaveBeenCalled();
   });
 

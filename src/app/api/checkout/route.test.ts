@@ -74,7 +74,7 @@ describe("POST /api/checkout", () => {
     );
   });
 
-  it("returns buyers to the request origin even when APP_URL differs", async () => {
+  it("returns buyers to the request origin they posted from even when APP_URL differs", async () => {
     vi.stubEnv("APP_URL", "https://other.example");
     vi.mocked(createCheckoutForListing).mockResolvedValue({
       ok: true,
@@ -83,7 +83,10 @@ describe("POST /api/checkout", () => {
     });
     const req = new Request("https://shop-git-preview.vercel.app/api/checkout", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://shop-git-preview.vercel.app",
+      },
       body: JSON.stringify({ listingId: LISTING_ID }),
     });
     const res = await POST(req);
@@ -91,6 +94,49 @@ describe("POST /api/checkout", () => {
     expect(createCheckoutForListing).toHaveBeenCalledWith(
       LISTING_ID,
       "https://shop-git-preview.vercel.app",
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it("returns buyers to the APP_URL origin they posted from behind a proxy", async () => {
+    vi.stubEnv("APP_URL", "https://shop.example");
+    vi.mocked(createCheckoutForListing).mockResolvedValue({
+      ok: true,
+      url: "https://checkout.stripe.com/c/pay/cs_test_3",
+      holdToken: HOLD,
+    });
+    const req = new Request("http://localhost:3000/api/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://shop.example" },
+      body: JSON.stringify({ listingId: LISTING_ID }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(createCheckoutForListing).toHaveBeenCalledWith(
+      LISTING_ID,
+      "https://shop.example",
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it("never returns buyers to a foreign Origin", async () => {
+    vi.stubEnv("APP_URL", "https://shop.example");
+    vi.mocked(createCheckoutForListing).mockResolvedValue({
+      ok: true,
+      url: "https://checkout.stripe.com/c/pay/cs_test_4",
+      holdToken: HOLD,
+    });
+    const req = new Request("http://localhost:3000/api/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://evil.test" },
+      body: JSON.stringify({ listingId: LISTING_ID }),
+    });
+    await POST(req);
+    expect(createCheckoutForListing).toHaveBeenCalledWith(
+      LISTING_ID,
+      "https://shop.example",
       expect.anything(),
       undefined,
     );

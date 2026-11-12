@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cancelCheckoutHold,
@@ -10,6 +10,7 @@ import {
 } from "@/lib/checkout";
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
 import { PURCHASE_REASON_TEXT } from "@/lib/purchase";
+import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 
 vi.mock("@/lib/fulfillment", () => ({ fulfillCheckoutSession: vi.fn() }));
 
@@ -119,6 +120,7 @@ function fakeStripe(): Stripe {
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  vi.stubEnv("APP_SCOPE", "");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `https://${APP_SCOPE}`);
   create.mockReset();
   retrieve.mockReset();
@@ -150,6 +152,10 @@ beforeEach(() => {
     },
     requirements: { entries: [] },
   }));
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 function setup(
@@ -557,12 +563,16 @@ describe("cancelCheckoutHold", () => {
     },
   );
 
-  it("still reports already_paid when fulfilment throws", async () => {
+  it.each([
+    ["a database error", new Error("db down")],
+    ["an unavailable app scope", new AppScopeUnavailableError()],
+  ])("keeps the hold and reports unknown when fulfilment throws %s", async (_label, err) => {
     retrieve.mockResolvedValue({ id: "cs_test_paid", status: "complete", url: null });
-    vi.mocked(fulfillCheckoutSession).mockRejectedValue(new Error("db down"));
+    vi.mocked(fulfillCheckoutSession).mockRejectedValue(err);
     const { admin, rpcCalls } = setup({ holds: [holdRow("cs_test_paid")] });
     const result = await cancelCheckoutHold(LISTING_ID, HOLD_TOKEN, cancelDeps(admin));
-    expect(result).toBe("already_paid");
+    expect(result).toBe("unknown");
+    expect(expire).not.toHaveBeenCalled();
     expect(rpcCalls).toEqual([]);
     expect(console.error).toHaveBeenCalled();
   });

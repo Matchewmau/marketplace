@@ -4,7 +4,7 @@ import type Stripe from "stripe";
 import { createCheckoutForListing } from "@/lib/checkout";
 import { readStripeEnv, StripeConfigError } from "@/lib/stripe/config";
 import { safeErrorMessage } from "@/lib/stripe/connect";
-import { getRequestOrigin, getStripe } from "@/lib/stripe/server";
+import { getCheckoutReturnOrigin, getStripe } from "@/lib/stripe/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   try {
     const result = await createCheckoutForListing(
       typeof record.listingId === "string" ? record.listingId : "",
-      getRequestOrigin(request),
+      getCheckoutReturnOrigin(request),
       { stripe, admin, feeBps },
       typeof record.holdToken === "string" ? record.holdToken : undefined,
     );

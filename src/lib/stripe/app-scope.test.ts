@@ -15,19 +15,25 @@ describe("getAppScope", () => {
     );
   });
 
-  it("prefers APP_SCOPE, trimmed and lowercased", () => {
+  it("prefers APP_SCOPE, trimmed, lowercased and namespaced", () => {
     expect(
       getAppScope({
         APP_SCOPE: "  Dev-Alice.Laptop:1  ",
         NEXT_PUBLIC_SUPABASE_URL: "https://abc.supabase.co",
       }),
-    ).toBe("dev-alice.laptop:1");
+    ).toBe("env:dev-alice.laptop:1");
   });
 
   it("uses APP_SCOPE with a local Supabase", () => {
     expect(
       getAppScope({ APP_SCOPE: "alice", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321" }),
-    ).toBe("alice");
+    ).toBe("env:alice");
+  });
+
+  it("never equals a scope derived from a Supabase host", () => {
+    expect(
+      getAppScope({ APP_SCOPE: "abc.supabase.co", NEXT_PUBLIC_SUPABASE_URL: "http://localhost:1" }),
+    ).toBe("env:abc.supabase.co");
   });
 
   it.each([
@@ -55,6 +61,13 @@ describe("getAppScope", () => {
     "http://0.0.0.0:54321",
     "http://host.docker.internal:54321",
     "http://supabase.localhost:54321",
+    "http://127.0.0.2:54321",
+    "http://127.1:54321",
+    "http://localhost.:54321",
+    "http://supabase.localhost.:54321",
+    "http://[::ffff:7f00:1]:54321",
+    "http://[::ffff:127.0.0.1]:54321",
+    "http://[0:0:0:0:0:0:0:1]:54321",
   ])("returns null for local Supabase %s without APP_SCOPE", (url) => {
     expect(getAppScope({ NEXT_PUBLIC_SUPABASE_URL: url })).toBeNull();
   });

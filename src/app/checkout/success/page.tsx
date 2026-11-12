@@ -4,6 +4,7 @@ import Stripe from "stripe";
 
 import { ClearHoldToken } from "@/components/marketplace/clear-hold-token";
 import { fulfillCheckoutSession, type FulfillResult } from "@/lib/fulfillment";
+import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 import { safeErrorMessage } from "@/lib/stripe/connect";
 import { getStripe } from "@/lib/stripe/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
@@ -99,7 +100,11 @@ export default async function CheckoutSuccessPage({ searchParams }: SuccessPageP
         </Panel>
       );
     }
-    console.error("checkout success failed:", safeErrorMessage(err));
+    // AppScopeUnavailableError included: the payment is kept and settled once the scope is fixed.
+    console.error(
+      "checkout success failed:",
+      err instanceof AppScopeUnavailableError ? "app scope unavailable" : safeErrorMessage(err),
+    );
     return (
       <Panel title="Confirming your payment">
         <Message>We&apos;re confirming your payment. Refresh this page in a moment.</Message>

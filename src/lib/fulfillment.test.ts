@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
+import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 
 const LISTING_ID = "11111111-1111-4111-8111-111111111111";
 const HOLD_TOKEN = "22222222-2222-4222-8222-222222222222";
@@ -92,6 +93,7 @@ function session(
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  vi.stubEnv("APP_SCOPE", "");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `https://${APP_SCOPE}`);
   retrieve.mockReset();
   refundCreate.mockReset();
@@ -100,6 +102,10 @@ beforeEach(() => {
   retrieve.mockResolvedValue(session());
   refundCreate.mockResolvedValue({ id: "re_test_1", status: "succeeded" });
   refundList.mockResolvedValue({ data: [] });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("fulfillCheckoutSession", () => {
@@ -240,11 +246,13 @@ describe("fulfillCheckoutSession", () => {
     expect(rpcCalls).toEqual([]);
   });
 
-  it("ignores every session when this deployment has no app scope", async () => {
+  it("throws AppScopeUnavailableError without touching anything when there is no app scope", async () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
     const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"]);
-    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result.outcome).toBe("ignored");
+    await expect(
+      fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin }),
+    ).rejects.toBeInstanceOf(AppScopeUnavailableError);
+    expect(retrieve).not.toHaveBeenCalled();
     expect(listingQueries).toEqual([]);
     expect(rpcCalls).toEqual([]);
     expect(refundCreate).not.toHaveBeenCalled();
@@ -252,15 +260,16 @@ describe("fulfillCheckoutSession", () => {
 
   it("never refunds another developer's session when both use the default local Supabase", async () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
-    vi.stubEnv("APP_SCOPE", "");
     retrieve.mockResolvedValue(
       session({
         metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "127.0.0.1:54321" },
       }),
     );
     const { admin, rpcCalls, listingQueries } = fakeAdmin([], { listingExists: false });
-    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result.outcome).toBe("ignored");
+    await expect(
+      fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin }),
+    ).rejects.toBeInstanceOf(AppScopeUnavailableError);
+    expect(retrieve).not.toHaveBeenCalled();
     expect(listingQueries).toEqual([]);
     expect(rpcCalls).toEqual([]);
     expect(refundCreate).not.toHaveBeenCalled();

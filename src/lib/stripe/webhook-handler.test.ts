@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
+import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 import { handleStripeEvent } from "@/lib/stripe/webhook-handler";
 
 vi.mock("@/lib/fulfillment", () => ({ fulfillCheckoutSession: vi.fn() }));
@@ -32,6 +33,7 @@ const stripe = {} as Stripe;
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  vi.stubEnv("APP_SCOPE", "");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `https://${APP_SCOPE}`);
   vi.mocked(fulfillCheckoutSession).mockReset();
   vi.mocked(fulfillCheckoutSession).mockResolvedValue({
@@ -39,6 +41,10 @@ beforeEach(() => {
     listingId: LISTING_ID,
     amountCents: 1999,
   });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("handleStripeEvent", () => {
@@ -123,17 +129,18 @@ describe("handleStripeEvent", () => {
     },
   );
 
-  it("ignores expired sessions when this deployment has no app scope", async () => {
+  it("throws for expired sessions when this deployment has no app scope so Stripe retries", async () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
     const { admin, rpcCalls } = fakeAdmin();
-    const outcome = await handleStripeEvent(
-      event("checkout.session.expired", {
-        id: "cs_test_6",
-        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
-      }),
-      { stripe, admin },
-    );
-    expect(outcome).toBe("ignored");
+    await expect(
+      handleStripeEvent(
+        event("checkout.session.expired", {
+          id: "cs_test_6",
+          metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
+        }),
+        { stripe, admin },
+      ),
+    ).rejects.toBeInstanceOf(AppScopeUnavailableError);
     expect(rpcCalls).toEqual([]);
   });
 

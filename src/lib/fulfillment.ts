@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
-import { getAppScope } from "@/lib/stripe/app-scope";
+import { AppScopeUnavailableError, getAppScope } from "@/lib/stripe/app-scope";
 import { isUuid } from "@/lib/validation";
 
 export type FulfillOutcome =
@@ -62,18 +62,24 @@ async function refundPayment(
  * and a session that lost the race for the listing is refunded (retried until marked refunded).
  * A paid session for a deleted listing is refunded as "refunded_unavailable". Sessions created by
  * another deployment (different app_scope) or without this app's metadata are ignored.
+ * Throws AppScopeUnavailableError, before touching Stripe or the database, when this deployment
+ * has no app scope, so callers retry instead of dropping a paid session.
  */
 export async function fulfillCheckoutSession(
   sessionId: string,
   deps: { stripe: Stripe; admin: SupabaseClient },
 ): Promise<FulfillResult> {
   const { stripe, admin } = deps;
+  const appScope = getAppScope();
+  if (!appScope) {
+    throw new AppScopeUnavailableError();
+  }
+
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
     expand: ["payment_intent"],
   });
 
-  const appScope = getAppScope();
-  if (!appScope || session.metadata?.app_scope !== appScope) {
+  if (session.metadata?.app_scope !== appScope) {
     // Another deployment sharing this Stripe sandbox owns this session; never touch it.
     console.warn(LOG_PREFIX, "ignoring session from another app scope", {
       sessionId: session.id,

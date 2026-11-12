@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
-import { getAppScope } from "@/lib/stripe/app-scope";
+import { AppScopeUnavailableError, getAppScope } from "@/lib/stripe/app-scope";
 import { isUuid } from "@/lib/validation";
 
 export type WebhookOutcome = "fulfilled" | "released" | "ignored";
@@ -20,7 +20,11 @@ export async function handleStripeEvent(
     }
     case "checkout.session.expired": {
       const appScope = getAppScope();
-      if (!appScope || event.data.object.metadata?.app_scope !== appScope) {
+      if (!appScope) {
+        // Throw so the webhook fails and Stripe retries once the scope is configured.
+        throw new AppScopeUnavailableError();
+      }
+      if (event.data.object.metadata?.app_scope !== appScope) {
         // Another deployment sharing this Stripe sandbox owns this session.
         return "ignored";
       }

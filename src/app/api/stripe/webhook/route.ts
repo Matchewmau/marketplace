@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 
+import { getAppScope } from "@/lib/stripe/app-scope";
 import { readStripeEnv } from "@/lib/stripe/config";
 import { safeErrorMessage } from "@/lib/stripe/connect";
 import { getStripe } from "@/lib/stripe/server";
@@ -30,6 +31,11 @@ export async function POST(request: Request) {
   }
   const admin = getSupabaseAdmin();
   if (!webhookSecret || !admin) {
+    return NextResponse.json({ error: NOT_CONFIGURED }, { status: 503 });
+  }
+  if (!getAppScope()) {
+    // Without a scope no session can be matched; a 503 makes Stripe retry until it is fixed.
+    console.error(LOG_PREFIX, "app scope unavailable");
     return NextResponse.json({ error: NOT_CONFIGURED }, { status: 503 });
   }
 

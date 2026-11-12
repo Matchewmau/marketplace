@@ -110,7 +110,10 @@ export async function createCheckoutForListing(
 
   const appScope = getAppScope();
   if (!appScope) {
-    console.error(LOG_PREFIX, "NEXT_PUBLIC_SUPABASE_URL is missing or invalid");
+    console.error(
+      LOG_PREFIX,
+      "app scope unavailable: set a valid APP_SCOPE (required with a local Supabase) or check NEXT_PUBLIC_SUPABASE_URL",
+    );
     return { ok: false, status: 503, error: NOT_CONFIGURED };
   }
 
@@ -308,13 +311,12 @@ export async function cancelCheckoutHold(
     if (session.status === "complete") {
       try {
         const { outcome } = await fulfillCheckoutSession(session.id, { stripe, admin });
-        if (outcome === "refunded") {
-          return "refunded";
-        }
+        return outcome === "refunded" ? "refunded" : "already_paid";
       } catch (err) {
+        // Not yet recorded (or refunded); keep the hold and let the webhook settle it.
         console.error(CANCEL_LOG_PREFIX, safeErrorMessage(err));
+        return "unknown";
       }
-      return "already_paid";
     }
     if (session.status === "open") {
       // Throws if the session could not be expired; the hold then stays until its TTL.
