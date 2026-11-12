@@ -1,7 +1,7 @@
 "use client";
 
 import { CreditCard } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { PURCHASE_REASON_TEXT } from "@/lib/purchase";
@@ -14,12 +14,25 @@ type BuyNowButtonProps = {
 };
 
 const FALLBACK_ERROR = "Could not start checkout. Try again.";
+// The hold is invalid or the purchase is blocked; other failures are transient, so keep the hold.
+const DISCARD_HOLD_STATUSES = new Set([400, 404, 409]);
 
 export function BuyNowButton({ listingId, purchase }: BuyNowButtonProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const reasonId = useId();
+
+  useEffect(() => {
+    // Restored from the back/forward cache after redirecting: re-enable the button.
+    function handlePageShow(event: PageTransitionEvent) {
+      if (!event.persisted) return;
+      inFlight.current = false;
+      setPending(false);
+    }
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, []);
 
   if (!purchase.buyable && purchase.reason === "free") {
     return null;
@@ -70,10 +83,12 @@ export function BuyNowButton({ listingId, purchase }: BuyNowButtonProps) {
       } | null;
 
       if (!response.ok) {
-        try {
-          window.sessionStorage.removeItem(key);
-        } catch {
-          // Storage unavailable; nothing to clear.
+        if (DISCARD_HOLD_STATUSES.has(response.status)) {
+          try {
+            window.sessionStorage.removeItem(key);
+          } catch {
+            // Storage unavailable; nothing to clear.
+          }
         }
         setError(data?.error ?? FALLBACK_ERROR);
         inFlight.current = false;

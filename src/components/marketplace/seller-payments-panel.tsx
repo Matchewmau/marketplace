@@ -58,13 +58,33 @@ export function SellerPaymentsPanel() {
   const [welcome, setWelcome] = useState(false);
   const pendingRef = useRef(false);
   const autoRan = useRef(false);
+  // Latest request number; responses from older requests are ignored.
+  const requestSeq = useRef(0);
+  // Normalized email currently in the input, kept in sync with the input value.
+  const currentEmail = useRef("");
+
+  useEffect(() => {
+    // Restored from the back/forward cache after redirecting: drop the stale request state.
+    function handlePageShow(event: PageTransitionEvent) {
+      if (!event.persisted) return;
+      requestSeq.current += 1;
+      pendingRef.current = false;
+      setPending(false);
+    }
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, []);
 
   const request = useCallback(
-    async (init: RequestInit, url: string) => {
+    async (init: RequestInit, url: string, forEmail: string) => {
       if (pendingRef.current) return;
       pendingRef.current = true;
+      const seq = ++requestSeq.current;
       setPending(true);
       setError(null);
+
+      const isStale = () =>
+        seq !== requestSeq.current || forEmail !== currentEmail.current;
 
       let redirecting = false;
       try {
@@ -72,6 +92,8 @@ export function SellerPaymentsPanel() {
         const data = (await response
           .json()
           .catch(() => null)) as ApiResponse | null;
+
+        if (isStale()) return;
 
         if (!response.ok || !data || data.error) {
           setError(data?.error ?? FALLBACK_ERROR);
@@ -92,9 +114,9 @@ export function SellerPaymentsPanel() {
           setStatus(data.status ?? null);
         }
       } catch {
-        setError(FALLBACK_ERROR);
+        if (!isStale()) setError(FALLBACK_ERROR);
       } finally {
-        if (!redirecting) {
+        if (!redirecting && seq === requestSeq.current) {
           pendingRef.current = false;
           setPending(false);
         }
@@ -108,6 +130,7 @@ export function SellerPaymentsPanel() {
       request(
         {},
         `/api/stripe/connect/status?email=${encodeURIComponent(value)}`,
+        value,
       ),
     [request],
   );
@@ -121,6 +144,7 @@ export function SellerPaymentsPanel() {
           body: JSON.stringify({ email: value }),
         },
         "/api/stripe/connect/onboard",
+        value,
       ),
     [request],
   );
@@ -135,7 +159,10 @@ export function SellerPaymentsPanel() {
     } catch {
       // localStorage can be unavailable; the form still works.
     }
-    if (stored) setEmail(stored);
+    if (stored) {
+      setEmail(stored);
+      currentEmail.current = stored.toLowerCase();
+    }
 
     if (!stored || !isValidEmail(stored.toLowerCase())) {
       if (onboarding === "return" || onboarding === "refresh") {
@@ -146,9 +173,9 @@ export function SellerPaymentsPanel() {
 
     if (onboarding === "return") {
       setWelcome(true);
-      void checkStatus(stored);
+      void checkStatus(stored.toLowerCase());
     } else if (onboarding === "refresh") {
-      void startOnboarding(stored);
+      void startOnboarding(stored.toLowerCase());
     }
   }, [onboarding, checkStatus, startOnboarding]);
 
@@ -208,6 +235,7 @@ export function SellerPaymentsPanel() {
             value={email}
             onChange={(event) => {
               setEmail(event.target.value);
+              currentEmail.current = event.target.value.trim().toLowerCase();
               setStatus(undefined);
               setWelcome(false);
             }}

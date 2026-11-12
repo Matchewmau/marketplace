@@ -45,12 +45,12 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
       } catch {
         holdToken = null;
       }
-      const query = holdToken
-        ? `?holdToken=${encodeURIComponent(holdToken)}`
-        : "";
+      // The hold token is a bearer credential: send it in a header, not the URL.
+      const headers: HeadersInit = holdToken ? { "x-hold-token": holdToken } : {};
 
       try {
-        const response = await fetch(`/api/listings/${listingId}${query}`, {
+        const response = await fetch(`/api/listings/${listingId}`, {
+          headers,
           signal: controller.signal,
         });
 

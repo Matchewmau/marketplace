@@ -66,7 +66,8 @@ async function loadPurchaseGate(listing: Listing, holdToken: string | null) {
 
 export async function GET(request: Request, { params }: RouteContext) {
   const { id } = await params;
-  const rawHoldToken = new URL(request.url).searchParams.get("holdToken");
+  // The hold token is a bearer credential, so it travels in a header, never the query string.
+  const rawHoldToken = request.headers.get("x-hold-token");
   const holdToken =
     rawHoldToken !== null && isUuid(rawHoldToken)
       ? rawHoldToken.toLowerCase()

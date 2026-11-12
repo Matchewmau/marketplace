@@ -93,10 +93,13 @@ function useAdmin(admin: ReturnType<typeof fakeAdmin>) {
   );
 }
 
-async function call(query = "") {
-  const res = await GET(new Request(`http://localhost/api/listings/x${query}`), {
-    params: Promise.resolve({ id: ID }),
-  });
+async function call(opts: { holdToken?: string; query?: string } = {}) {
+  const headers: Record<string, string> = {};
+  if (opts.holdToken !== undefined) headers["x-hold-token"] = opts.holdToken;
+  const res = await GET(
+    new Request(`http://localhost/api/listings/x${opts.query ?? ""}`, { headers }),
+    { params: Promise.resolve({ id: ID }) },
+  );
   const text = await res.text();
   return { status: res.status, text, body: JSON.parse(text) };
 }
@@ -144,25 +147,31 @@ describe("GET /api/listings/[id] purchase state", () => {
     expect(text).not.toContain("stripe_account_id");
   });
 
-  it("is buyable when the holdToken matches the active hold", async () => {
+  it("is buyable when the x-hold-token header matches the active hold", async () => {
     useAdmin(fakeAdmin({ seller: { charges_enabled: true }, hold: true }));
-    const { status, body, text } = await call(`?holdToken=${HOLD_TOKEN}`);
+    const { status, body, text } = await call({ holdToken: HOLD_TOKEN });
     expect(status).toBe(200);
     expect(body.purchase).toEqual({ buyable: true, amountCents: 2500 });
     expect(text).not.toContain(HOLD_TOKEN);
     expect(text).not.toContain("hold_token");
   });
 
-  it("stays reserved when the holdToken does not match", async () => {
+  it("ignores a hold token sent in the query string", async () => {
     useAdmin(fakeAdmin({ seller: { charges_enabled: true }, hold: true }));
-    const { body, text } = await call(`?holdToken=${OTHER_TOKEN}`);
+    const { body } = await call({ query: `?holdToken=${HOLD_TOKEN}` });
+    expect(body.purchase).toEqual({ buyable: false, reason: "reserved" });
+  });
+
+  it("stays reserved when the x-hold-token header does not match", async () => {
+    useAdmin(fakeAdmin({ seller: { charges_enabled: true }, hold: true }));
+    const { body, text } = await call({ holdToken: OTHER_TOKEN });
     expect(body.purchase).toEqual({ buyable: false, reason: "reserved" });
     expect(text).not.toContain(HOLD_TOKEN);
   });
 
-  it("ignores a malformed holdToken", async () => {
+  it("ignores a malformed x-hold-token header", async () => {
     useAdmin(fakeAdmin({ seller: { charges_enabled: true }, hold: true }));
-    const { body } = await call("?holdToken=not-a-uuid");
+    const { body } = await call({ holdToken: "not-a-uuid" });
     expect(body.purchase).toEqual({ buyable: false, reason: "reserved" });
   });
 
