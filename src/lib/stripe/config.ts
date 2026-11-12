@@ -1,15 +1,16 @@
 export class StripeConfigError extends Error {}
 
-const SANDBOX_SECRET_KEY = /^(sk|rk)_test_[A-Za-z0-9]+/;
+const SANDBOX_SECRET_KEY = /^(sk|rk)_test_[A-Za-z0-9]+$/;
 
 /** Returns the key if it is a Stripe sandbox secret or restricted key; otherwise throws StripeConfigError. */
 export function assertSandboxSecretKey(key: string | undefined): string {
-  if (!key || !SANDBOX_SECRET_KEY.test(key)) {
+  const trimmed = key?.trim() ?? "";
+  if (!SANDBOX_SECRET_KEY.test(trimmed)) {
     throw new StripeConfigError(
       "STRIPE_SECRET_KEY must be a Stripe sandbox secret or restricted key (sk_test_ or rk_test_).",
     );
   }
-  return key;
+  return trimmed;
 }
 
 export type StripeEnv = {
