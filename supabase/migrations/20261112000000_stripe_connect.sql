@@ -17,6 +17,10 @@ create policy "Anyone can create listings" on public.listings
 -- Server-side RPCs read and update listings as service_role; do not rely on automatic grants.
 grant select, update on table public.listings to service_role;
 
+-- The seller inbox (src/app/api/messages/route.ts) reads messages through the admin client;
+-- do not depend on Supabase's automatic grants.
+grant select on public.messages to service_role;
+
 -- Hardening: pin search_path and keep the trigger function off the public API.
 alter function public.update_updated_at_column() set search_path = public;
 revoke execute on function public.update_updated_at_column() from public, anon, authenticated;

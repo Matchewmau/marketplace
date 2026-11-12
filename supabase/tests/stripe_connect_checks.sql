@@ -244,6 +244,10 @@ begin
     end if;
   end loop;
 
+  if not has_table_privilege('service_role', 'public.messages', 'select') then
+    raise exception 'CHECK FAILED: service_role must select on public.messages';
+  end if;
+
   foreach v_tbl in array array['public.seller_accounts', 'public.listing_holds', 'public.orders'] loop
     foreach v_priv in array array['select', 'insert', 'update', 'delete'] loop
       if not has_table_privilege('service_role', v_tbl, v_priv) then
