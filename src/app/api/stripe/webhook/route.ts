@@ -33,11 +33,6 @@ export async function POST(request: Request) {
   if (!webhookSecret || !admin) {
     return NextResponse.json({ error: NOT_CONFIGURED }, { status: 503 });
   }
-  if (!getAppScope()) {
-    // Without a scope no session can be matched; a 503 makes Stripe retry until it is fixed.
-    console.error(LOG_PREFIX, "app scope unavailable");
-    return NextResponse.json({ error: NOT_CONFIGURED }, { status: 503 });
-  }
 
   let event: Stripe.Event;
   try {
@@ -45,6 +40,14 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error(LOG_PREFIX, safeErrorMessage(err));
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
+  }
+
+  // Checked after the signature so unsigned requests get 400 and do not log scope errors. Without
+  // a scope no session can be matched; a 503 makes Stripe retry for a limited time (a few hours in
+  // a sandbox, up to 3 days live), so resend failed events after fixing it.
+  if (!getAppScope()) {
+    console.error(LOG_PREFIX, "app scope unavailable");
+    return NextResponse.json({ error: NOT_CONFIGURED }, { status: 503 });
   }
 
   try {

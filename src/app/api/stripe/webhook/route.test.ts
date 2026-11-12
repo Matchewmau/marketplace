@@ -96,6 +96,20 @@ describe("POST /api/stripe/webhook", () => {
     expect(fulfillCheckoutSession).not.toHaveBeenCalled();
   });
 
+  it("returns 400 for an invalid signature even when the app scope is unavailable", async () => {
+    vi.mocked(console.error).mockClear();
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    const signature = signer.webhooks.generateTestHeaderString({
+      payload,
+      secret: "whsec_wrong_secret",
+    });
+    const res = await POST(post(payload, signature));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid signature." });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("app scope");
+    expect(fulfillCheckoutSession).not.toHaveBeenCalled();
+  });
+
   it("returns 500 when handling fails so Stripe retries delivery", async () => {
     vi.mocked(fulfillCheckoutSession).mockRejectedValue(new Error("db down sk_test_secret123"));
     const signature = signer.webhooks.generateTestHeaderString({ payload, secret: SECRET });

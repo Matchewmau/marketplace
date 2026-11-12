@@ -38,7 +38,8 @@ function isLocalHostname(hostname: string): boolean {
  * `env:<value>`); otherwise the Supabase project host (e.g. `xyz.supabase.co`). Environments that
  * share one Stripe sandbox but use different scopes ignore each other's sessions instead of
  * refunding them.
- * Null (checkout disabled, fulfilment and webhooks retried) when APP_SCOPE is invalid, when
+ * Null (checkout disabled; fulfilment and webhooks fail, and Stripe retries deliveries only for a
+ * limited time, a few hours in a sandbox, so failed events may need resending) when APP_SCOPE is invalid, when
  * NEXT_PUBLIC_SUPABASE_URL is unset or invalid, or when it points at a local Supabase without
  * APP_SCOPE: default local hosts are identical for every developer, so they are not unique.
  */
