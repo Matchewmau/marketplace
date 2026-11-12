@@ -98,7 +98,7 @@ Stripe variables (all server-only):
 | `STRIPE_SECRET_KEY` | Sandbox secret or restricted key only (`sk_test_` or `rk_test_`). The server refuses anything else, including live keys. |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret (`whsec_…`) for the webhook endpoint. Required by `/api/stripe/webhook`. |
 | `PLATFORM_FEE_BPS` | Optional platform fee in basis points, `0`–`10000`. Defaults to `0`. |
-| `APP_URL` | Origin used for Stripe redirect URLs. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, leave it unset (the request origin is used) or set it to the production URL. |
+| `APP_URL` | Origin used for Stripe redirect URLs. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, set it to the production URL (recommended); if unset, the request origin is used. |
 
 The Stripe publishable key is not needed because the app uses Stripe-hosted
 Checkout. Replace the placeholders with real sandbox values: the server rejects
@@ -170,6 +170,12 @@ server. If you have not run `stripe login`, pass the key instead:
 
 The checkout success page also records the order, so a purchase completes even
 if the CLI is not running. Webhooks cover closed tabs and expired sessions.
+
+Each Checkout Session carries an `app_scope` metadata value: the host of
+`NEXT_PUBLIC_SUPABASE_URL` (for example `xyz.supabase.co`). The webhook and the
+success page ignore sessions whose `app_scope` differs from their own, so local
+dev, production, and other developers sharing one Stripe sandbox (each with
+their own Supabase project) never record or refund each other's checkouts.
 
 ### Try the full flow
 
@@ -283,10 +289,15 @@ All are executable by `service_role` only.
 | `POST` | `/api/stripe/connect/onboard` | Start or resume seller onboarding. Body: `{ email }`. Returns `{ url }` (Stripe onboarding link) while details are still needed, or `{ status }` (`charges_enabled`, `payouts_enabled`, `details_submitted`) once the seller has submitted everything. `400` for an invalid email, `409` if the linked Stripe account no longer exists, `500` on database errors, `502` on Stripe errors, `503` when payments are not configured. |
 | `GET` | `/api/stripe/connect/status` | Seller payout status. Query param: `email`. Returns `{ status }` with the three flags above, or `{ status: null }` when the email has not started onboarding. Not cached. `400`, `500`, `502`, `503` as above. |
 | `POST` | `/api/checkout` | Start Checkout for a listing. Body: `{ listingId, holdToken? }`. The amount comes from the database, never the client. Returns `{ url, holdToken }` to redirect to Stripe Checkout (passing the previous `holdToken` resumes an open session). Blocked purchases return `409 { error, reason }` with a reason from the list above; also `400`, `404`, `500`, `502`, `503`. |
-| `POST` | `/api/stripe/webhook` | Stripe webhook. Verifies the `stripe-signature` header, then handles `checkout.session.completed` and `checkout.session.async_payment_succeeded` (record the order) and `checkout.session.expired` (release the hold). Returns `{ received: true }`; `400` for a missing or invalid signature, `500` so Stripe retries on failure, `503` when not configured. |
+| `POST` | `/api/checkout/cancel` | Cancel the buyer's checkout. Body: `{ listingId, holdToken }` (both UUIDs). Expires the open Checkout Session and releases the hold. Returns `{ result }` where `result` is `cancelled`, `already_paid` (the session was paid), `refunded` (paid, but the item was already sold, so the payment was refunded), or `unknown` (the hold is gone or Stripe could not be reached). `400` for an invalid body, `503` when not configured. |
+| `POST` | `/api/stripe/webhook` | Stripe webhook. Verifies the `stripe-signature` header, then handles `checkout.session.completed` and `checkout.session.async_payment_succeeded` (record the order) and `checkout.session.expired` (release the hold). Sessions whose `app_scope` metadata belongs to another Supabase project are ignored. Returns `{ received: true }`; `400` for a missing or invalid signature, `500` so Stripe retries on failure, `503` when not configured. |
 
 Validation errors return `{ error: string }` with status `400`. Storage or
 database failures return `500`.
+
+The hold token never appears in a URL. “Buy now” keeps it in `sessionStorage`
+(`hold:<listingId>`); Stripe's cancel URL is `/checkout/cancel?listing=<id>`,
+and that page posts the saved token to `/api/checkout/cancel` from the browser.
 
 ## Deploying to Vercel
 
@@ -295,14 +306,18 @@ database failures return `500`.
 3. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
    `SUPABASE_SERVICE_ROLE_KEY` to Production, Preview, and Development. For
    payments also add `STRIPE_SECRET_KEY` (sandbox key) and
-   `PLATFORM_FEE_BPS` if you want a fee. Leave `APP_URL` unset or set it to the
-   production URL.
+   `PLATFORM_FEE_BPS` if you want a fee. Set `APP_URL` to the production URL
+   (recommended) so Stripe redirects always go to the production domain; if it
+   is unset, the request origin is used.
 4. In the Stripe Dashboard, create a webhook endpoint for the **production**
    URL `/api/stripe/webhook` with the events `checkout.session.completed`,
    `checkout.session.async_payment_succeeded`, and `checkout.session.expired`.
    Listen to events on your own account only (not "Connected accounts"), as
    snapshot events. Put its signing secret in `STRIPE_WEBHOOK_SECRET`. Preview deployments sit
    behind Vercel deployment protection, so Stripe cannot reach their webhooks.
+   The endpoint only handles sessions whose `app_scope` metadata matches the
+   production Supabase project, so local `stripe listen` sessions on the same
+   sandbox are ignored (and vice versa).
 5. Deploy. Pushing to `main` triggers a new production deployment.
 6. Smoke-test the deployment: browse and search, create a listing with a photo,
    send a message, then read it in `/messages` using that listing’s seller
@@ -344,7 +359,10 @@ on every push and pull request with read-only repository permissions.
   links for that email. If Stripe later asks for more information, the seller
   has to update it through Stripe directly.
 - No refund UI. Refunds only happen automatically when a second payment lands
-  on an already-sold listing.
+  on an already-sold listing, or when the listing was deleted before payment.
+- On a public sandbox deployment anyone can “buy” a listing with Stripe's
+  public test card (`4242 4242 4242 4242`) and mark it sold. There is no admin
+  reset in the app.
 - Sold listings stay visible with a “Sold” badge.
 - One item per checkout, USD only.
 - No radius/distance filtering and no pagination; results are capped at 100.

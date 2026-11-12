@@ -19,6 +19,7 @@ const SELLER = "seller@example.com";
 const ACCOUNT = "acct_seller_1";
 const ORIGIN = "https://shop.example.com";
 const NOW_MS = Date.UTC(2026, 10, 12, 12, 0, 0);
+const APP_SCOPE = "xyz.supabase.co";
 
 type Row = Record<string, unknown>;
 type RpcCall = { name: string; args: Record<string, unknown> };
@@ -117,6 +118,8 @@ function fakeStripe(): Stripe {
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `https://${APP_SCOPE}`);
   create.mockReset();
   retrieve.mockReset();
   expire.mockReset();
@@ -189,6 +192,15 @@ describe("createCheckoutForListing", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("returns 503 without reserving when the app scope is not configured", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    const { admin, rpcCalls } = setup();
+    const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
+    expect(result).toEqual({ ok: false, status: 503, error: "Payments are not configured." });
+    expect(rpcCalls).toEqual([]);
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("blocks a free listing with 409 free", async () => {
     const { admin, rpcCalls } = setup({ listing: listing({ price: 0 }) });
     const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
@@ -218,12 +230,12 @@ describe("createCheckoutForListing", () => {
       listing_id: LISTING_ID,
       hold_token: result.holdToken,
       seller_account_id: ACCOUNT,
+      app_scope: APP_SCOPE,
     };
     expect(params.metadata).toEqual(metadata);
     expect(params.payment_intent_data.metadata).toEqual(metadata);
-    expect(params.cancel_url).toBe(
-      `${ORIGIN}/checkout/cancel?listing=${LISTING_ID}&hold=${result.holdToken}`,
-    );
+    expect(params.cancel_url).toBe(`${ORIGIN}/checkout/cancel?listing=${LISTING_ID}`);
+    expect(params.cancel_url).not.toContain(result.holdToken);
     expect(options).toEqual({ idempotencyKey: `checkout:${result.holdToken}` });
     expect(rpcCalls.map((c) => c.name)).toEqual(["reserve_listing", "attach_hold_session"]);
     expect(rpcCalls[0].args).toEqual({
@@ -415,12 +427,34 @@ describe("createCheckoutForListing", () => {
     });
   });
 
-  it("still releases the hold when expiring after a failed attach throws", async () => {
-    expire.mockRejectedValue(new Error("stripe down"));
+  it("keeps the hold when expiring after a failed attach throws", async () => {
+    expire.mockRejectedValue(new Error("stripe down sk_test_secret123"));
     const { admin, rpcCalls } = setup({ rpcErrors: { attach_hold_session: "db down" } });
     const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
-    expect(result).toMatchObject({ ok: false, status: 502 });
-    expect(rpcCalls.some((c) => c.name === "release_listing_hold")).toBe(true);
+    expect(result).toEqual({
+      ok: false,
+      status: 502,
+      error: "Could not start checkout. Try again.",
+    });
+    expect(rpcCalls.map((c) => c.name)).toEqual(["reserve_listing", "attach_hold_session"]);
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("sk_test_secret123");
+  });
+
+  it("keeps the hold and returns 502 when an open session without a url cannot be expired", async () => {
+    retrieve.mockResolvedValue({ id: "cs_test_nourl", status: "open", url: null });
+    expire.mockRejectedValue(new Error("stripe down"));
+    const { admin, rpcCalls } = setup({ holds: [holdRow("cs_test_nourl")] });
+
+    const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin), HOLD_TOKEN);
+
+    expect(result).toEqual({
+      ok: false,
+      status: 502,
+      error: "Could not start checkout. Try again.",
+    });
+    expect(expire).toHaveBeenCalledWith("cs_test_nourl");
+    expect(rpcCalls).toEqual([]);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("expires an open session without a url, releases the own hold and reserves anew", async () => {
@@ -493,6 +527,35 @@ describe("cancelCheckoutHold", () => {
     expect(expire).not.toHaveBeenCalled();
     expect(rpcCalls).toEqual([]);
   });
+
+  it("reports refunded when the completed session lost the listing and was refunded", async () => {
+    retrieve.mockResolvedValue({ id: "cs_test_paid", status: "complete", url: null });
+    vi.mocked(fulfillCheckoutSession).mockResolvedValue({
+      outcome: "refunded",
+      listingId: LISTING_ID,
+      amountCents: 1999,
+    });
+    const { admin, rpcCalls } = setup({ holds: [holdRow("cs_test_paid")] });
+    const result = await cancelCheckoutHold(LISTING_ID, HOLD_TOKEN, cancelDeps(admin));
+    expect(result).toBe("refunded");
+    expect(expire).not.toHaveBeenCalled();
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it.each(["duplicate", "refunded_unavailable"] as const)(
+    "reports already_paid when fulfilment returns %s",
+    async (outcome) => {
+      retrieve.mockResolvedValue({ id: "cs_test_paid", status: "complete", url: null });
+      vi.mocked(fulfillCheckoutSession).mockResolvedValue({
+        outcome,
+        listingId: LISTING_ID,
+        amountCents: 1999,
+      });
+      const { admin } = setup({ holds: [holdRow("cs_test_paid")] });
+      const result = await cancelCheckoutHold(LISTING_ID, HOLD_TOKEN, cancelDeps(admin));
+      expect(result).toBe("already_paid");
+    },
+  );
 
   it("still reports already_paid when fulfilment throws", async () => {
     retrieve.mockResolvedValue({ id: "cs_test_paid", status: "complete", url: null });

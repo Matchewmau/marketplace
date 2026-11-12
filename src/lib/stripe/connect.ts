@@ -193,10 +193,14 @@ export async function unbindSellerAccount(
   }
 }
 
-const SECRET_PATTERN = /\b(?:sk|rk|pk|whsec)_[A-Za-z0-9_*]+/g;
+const SECRET_PATTERNS = [
+  /\b(?:sk|rk|pk|whsec)_[A-Za-z0-9_*]+/g,
+  /\bsb_(?:secret|publishable)_[A-Za-z0-9_-]+/g,
+  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g,
+];
 
 /** Error message safe for server logs: never the full error object, with key-like tokens redacted. */
 export function safeErrorMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
-  return message.replace(SECRET_PATTERN, "[redacted]");
+  return SECRET_PATTERNS.reduce((text, pattern) => text.replace(pattern, "[redacted]"), message);
 }

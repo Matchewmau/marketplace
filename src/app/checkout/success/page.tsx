@@ -126,6 +126,15 @@ export default async function CheckoutSuccessPage({ searchParams }: SuccessPageP
     );
   }
 
+  if (outcome === "refunded_unavailable") {
+    return (
+      <Panel title="Item no longer available">
+        <Message>This item is no longer available. Your payment has been refunded.</Message>
+        {listingId && <ClearHoldToken listingId={listingId} />}
+      </Panel>
+    );
+  }
+
   if (outcome === "not_paid") {
     return (
       <Panel title="Payment processing" listingId={listingId}>

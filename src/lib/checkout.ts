@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
 import { getPurchaseState, PURCHASE_REASON_TEXT } from "@/lib/purchase";
 import { applicationFeeCents, safeProductImage } from "@/lib/stripe/amount";
+import { getAppScope } from "@/lib/stripe/app-scope";
 import {
   refreshSellerAccount,
   safeErrorMessage,
@@ -36,12 +37,13 @@ export type CheckoutResult =
 type ListingRow = Pick<Listing, "id" | "title" | "price" | "image_url" | "seller_email" | "status">;
 type HoldRow = { checkout_session_id: string | null };
 
-export type CancelResult = "cancelled" | "already_paid" | "unknown";
+export type CancelResult = "cancelled" | "already_paid" | "refunded" | "unknown";
 
 const LOG_PREFIX = "checkout failed:";
 const CANCEL_LOG_PREFIX = "checkout cancel failed:";
 const START_ERROR = "Could not start checkout. Try again.";
 const SERVER_ERROR = "Could not start checkout.";
+const NOT_CONFIGURED = "Payments are not configured.";
 
 function blocked(reason: PurchaseBlockReason): CheckoutResult {
   return { ok: false, status: 409, error: PURCHASE_REASON_TEXT[reason], reason };
@@ -58,6 +60,17 @@ async function releaseHold(
   });
   if (error) {
     console.error(LOG_PREFIX, "release_listing_hold", safeErrorMessage(error.message));
+  }
+}
+
+/** Expires a Checkout Session; false (logged) if Stripe refused, so the caller keeps the hold. */
+async function expireSession(stripe: Stripe, sessionId: string): Promise<boolean> {
+  try {
+    await stripe.checkout.sessions.expire(sessionId);
+    return true;
+  } catch (err) {
+    console.error(LOG_PREFIX, "expire session", safeErrorMessage(err));
+    return false;
   }
 }
 
@@ -93,6 +106,12 @@ export async function createCheckoutForListing(
 
   if (typeof listingId !== "string" || !isUuid(listingId)) {
     return { ok: false, status: 400, error: "Invalid listing." };
+  }
+
+  const appScope = getAppScope();
+  if (!appScope) {
+    console.error(LOG_PREFIX, "NEXT_PUBLIC_SUPABASE_URL is missing or invalid");
+    return { ok: false, status: 503, error: NOT_CONFIGURED };
   }
 
   const { data: listingData, error: listingError } = await admin
@@ -133,11 +152,10 @@ export async function createCheckoutForListing(
         return blocked("sold");
       }
       if (session.status === "open") {
-        // An open session without a url cannot be resumed; expire it and start over.
-        try {
-          await stripe.checkout.sessions.expire(session.id);
-        } catch (err) {
-          console.error(LOG_PREFIX, "expire session", safeErrorMessage(err));
+        // An open session without a url cannot be resumed; expire it and start over. If it cannot
+        // be expired it may still be paid, so keep the hold (its TTL clears it).
+        if (!(await expireSession(stripe, session.id))) {
+          return { ok: false, status: 502, error: START_ERROR };
         }
         await releaseHold(admin, listing.id, holdToken);
       }
@@ -218,16 +236,19 @@ export async function createCheckoutForListing(
             listing_id: listing.id,
             hold_token: hold,
             seller_account_id: seller.stripe_account_id,
+            app_scope: appScope,
           },
         },
         metadata: {
           listing_id: listing.id,
           hold_token: hold,
           seller_account_id: seller.stripe_account_id,
+          app_scope: appScope,
         },
         expires_at: nowSec + CHECKOUT_SESSION_TTL_SECONDS,
         success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}/checkout/cancel?listing=${listing.id}&hold=${hold}`,
+        // The hold token stays out of the URL; the cancel page posts it from sessionStorage.
+        cancel_url: `${origin}/checkout/cancel?listing=${listing.id}`,
       },
       { idempotencyKey: `checkout:${hold}` },
     );
@@ -252,12 +273,10 @@ export async function createCheckoutForListing(
   if (attachError) {
     console.error(LOG_PREFIX, "attach_hold_session", safeErrorMessage(attachError.message));
     // Without the session on the hold it cannot be resumed or cancelled; do not hand it out.
-    try {
-      await stripe.checkout.sessions.expire(session.id);
-    } catch (err) {
-      console.error(LOG_PREFIX, "expire session", safeErrorMessage(err));
+    // Release the hold only once the session can no longer be paid; otherwise its TTL clears it.
+    if (await expireSession(stripe, session.id)) {
+      await releaseHold(admin, listing.id, hold);
     }
-    await releaseHold(admin, listing.id, hold);
     return { ok: false, status: 502, error: START_ERROR };
   }
 
@@ -288,7 +307,10 @@ export async function cancelCheckoutHold(
     const session = await stripe.checkout.sessions.retrieve(hold.checkout_session_id);
     if (session.status === "complete") {
       try {
-        await fulfillCheckoutSession(session.id, { stripe, admin });
+        const { outcome } = await fulfillCheckoutSession(session.id, { stripe, admin });
+        if (outcome === "refunded") {
+          return "refunded";
+        }
       } catch (err) {
         console.error(CANCEL_LOG_PREFIX, safeErrorMessage(err));
       }

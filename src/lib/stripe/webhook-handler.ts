@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
+import { getAppScope } from "@/lib/stripe/app-scope";
 import { isUuid } from "@/lib/validation";
 
 export type WebhookOutcome = "fulfilled" | "released" | "ignored";
@@ -13,10 +14,16 @@ export async function handleStripeEvent(
   switch (event.type) {
     case "checkout.session.completed":
     case "checkout.session.async_payment_succeeded": {
+      // recorded, duplicate, refunded and refunded_unavailable are all handled; only ignored is not.
       const { outcome } = await fulfillCheckoutSession(event.data.object.id, deps);
       return outcome === "ignored" ? "ignored" : "fulfilled";
     }
     case "checkout.session.expired": {
+      const appScope = getAppScope();
+      if (!appScope || event.data.object.metadata?.app_scope !== appScope) {
+        // Another deployment sharing this Stripe sandbox owns this session.
+        return "ignored";
+      }
       const listingId = event.data.object.metadata?.listing_id;
       const holdToken = event.data.object.metadata?.hold_token;
       if (!listingId || !holdToken || !isUuid(listingId) || !isUuid(holdToken)) {

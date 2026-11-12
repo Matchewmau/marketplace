@@ -9,6 +9,7 @@ vi.mock("@/lib/fulfillment", () => ({ fulfillCheckoutSession: vi.fn() }));
 
 const LISTING_ID = "11111111-1111-4111-8111-111111111111";
 const HOLD_TOKEN = "22222222-2222-4222-8222-222222222222";
+const APP_SCOPE = "xyz.supabase.co";
 
 type RpcCall = { name: string; args: Record<string, unknown> };
 
@@ -30,6 +31,8 @@ function event(type: string, object: Record<string, unknown>): Stripe.Event {
 const stripe = {} as Stripe;
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `https://${APP_SCOPE}`);
   vi.mocked(fulfillCheckoutSession).mockReset();
   vi.mocked(fulfillCheckoutSession).mockResolvedValue({
     outcome: "recorded",
@@ -64,7 +67,7 @@ describe("handleStripeEvent", () => {
     const outcome = await handleStripeEvent(
       event("checkout.session.expired", {
         id: "cs_test_3",
-        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN },
+        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
       }),
       { stripe, admin },
     );
@@ -103,6 +106,37 @@ describe("handleStripeEvent", () => {
     expect(outcome).toBe("ignored");
   });
 
+  it.each(["duplicate", "refunded", "refunded_unavailable"] as const)(
+    "treats a %s fulfilment as handled",
+    async (fulfilOutcome) => {
+      vi.mocked(fulfillCheckoutSession).mockResolvedValue({
+        outcome: fulfilOutcome,
+        listingId: LISTING_ID,
+        amountCents: 1999,
+      });
+      const { admin } = fakeAdmin();
+      const outcome = await handleStripeEvent(
+        event("checkout.session.completed", { id: "cs_test_1" }),
+        { stripe, admin },
+      );
+      expect(outcome).toBe("fulfilled");
+    },
+  );
+
+  it("ignores expired sessions when this deployment has no app scope", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    const { admin, rpcCalls } = fakeAdmin();
+    const outcome = await handleStripeEvent(
+      event("checkout.session.expired", {
+        id: "cs_test_6",
+        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
+      }),
+      { stripe, admin },
+    );
+    expect(outcome).toBe("ignored");
+    expect(rpcCalls).toEqual([]);
+  });
+
   it("propagates fulfilment errors so the webhook is retried", async () => {
     vi.mocked(fulfillCheckoutSession).mockRejectedValue(new Error("db down"));
     const { admin } = fakeAdmin();
@@ -116,9 +150,14 @@ describe("handleStripeEvent", () => {
 
   it.each([
     ["no metadata", undefined],
-    ["a non-uuid listing_id", { listing_id: "abc", hold_token: HOLD_TOKEN }],
-    ["a non-uuid hold_token", { listing_id: LISTING_ID, hold_token: "h" }],
-    ["a missing hold_token", { listing_id: LISTING_ID }],
+    ["a non-uuid listing_id", { listing_id: "abc", hold_token: HOLD_TOKEN, app_scope: APP_SCOPE }],
+    ["a non-uuid hold_token", { listing_id: LISTING_ID, hold_token: "h", app_scope: APP_SCOPE }],
+    ["a missing hold_token", { listing_id: LISTING_ID, app_scope: APP_SCOPE }],
+    ["a missing app_scope", { listing_id: LISTING_ID, hold_token: HOLD_TOKEN }],
+    [
+      "another deployment's app_scope",
+      { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "other.supabase.co" },
+    ],
   ])("ignores an expired session with %s", async (_label, metadata) => {
     const { admin, rpcCalls } = fakeAdmin();
     const outcome = await handleStripeEvent(
@@ -135,7 +174,7 @@ describe("handleStripeEvent", () => {
       handleStripeEvent(
         event("checkout.session.expired", {
           id: "cs_test_5",
-          metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN },
+          metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
         }),
         { stripe, admin },
       ),

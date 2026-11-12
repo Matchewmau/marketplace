@@ -1,9 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 
+import { getAppScope } from "@/lib/stripe/app-scope";
 import { isUuid } from "@/lib/validation";
 
-export type FulfillOutcome = "recorded" | "duplicate" | "refunded" | "not_paid" | "ignored";
+export type FulfillOutcome =
+  | "recorded"
+  | "duplicate"
+  | "refunded"
+  | "refunded_unavailable"
+  | "not_paid"
+  | "ignored";
 export type FulfillResult = {
   outcome: FulfillOutcome;
   listingId: string | null;
@@ -53,7 +60,8 @@ async function refundPayment(
 /**
  * Records a paid Checkout Session as an order. Idempotent: a repeat call returns "duplicate",
  * and a session that lost the race for the listing is refunded (retried until marked refunded).
- * Paid sessions without this app's metadata are ignored.
+ * A paid session for a deleted listing is refunded as "refunded_unavailable". Sessions created by
+ * another deployment (different app_scope) or without this app's metadata are ignored.
  */
 export async function fulfillCheckoutSession(
   sessionId: string,
@@ -63,6 +71,15 @@ export async function fulfillCheckoutSession(
   const session = await stripe.checkout.sessions.retrieve(sessionId, {
     expand: ["payment_intent"],
   });
+
+  const appScope = getAppScope();
+  if (!appScope || session.metadata?.app_scope !== appScope) {
+    // Another deployment sharing this Stripe sandbox owns this session; never touch it.
+    console.warn(LOG_PREFIX, "ignoring session from another app scope", {
+      sessionId: session.id,
+    });
+    return { outcome: "ignored", listingId: null, amountCents: session.amount_total };
+  }
 
   const metadataListingId = session.metadata?.listing_id ?? null;
   const listingId = metadataListingId && isUuid(metadataListingId) ? metadataListingId : null;
@@ -113,7 +130,7 @@ export async function fulfillCheckoutSession(
       sessionId: session.id,
       refundId,
     });
-    return { outcome: "refunded", listingId, amountCents };
+    return { outcome: "refunded_unavailable", listingId, amountCents };
   }
 
   const { data, error } = await admin.rpc("record_paid_order", {

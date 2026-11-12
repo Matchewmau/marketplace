@@ -7,6 +7,7 @@ import { fulfillCheckoutSession } from "@/lib/fulfillment";
 const LISTING_ID = "11111111-1111-4111-8111-111111111111";
 const HOLD_TOKEN = "22222222-2222-4222-8222-222222222222";
 const SESSION_ID = "cs_test_paid";
+const APP_SCOPE = "xyz.supabase.co";
 
 type RpcCall = { name: string; args: Record<string, unknown> };
 
@@ -75,7 +76,12 @@ function session(
     metadata:
       opts.metadata !== undefined
         ? opts.metadata
-        : { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, seller_account_id: "acct_seller_1" },
+        : {
+            listing_id: LISTING_ID,
+            hold_token: HOLD_TOKEN,
+            seller_account_id: "acct_seller_1",
+            app_scope: APP_SCOPE,
+          },
     payment_intent: {
       id: "pi_test_1",
       application_fee_amount: opts.fee === undefined ? 99 : opts.fee,
@@ -85,6 +91,8 @@ function session(
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", `https://${APP_SCOPE}`);
   retrieve.mockReset();
   refundCreate.mockReset();
   refundList.mockReset();
@@ -181,9 +189,22 @@ describe("fulfillCheckoutSession", () => {
 
   it.each([
     ["no metadata", null],
-    ["a non-uuid listing_id", { listing_id: "abc", hold_token: HOLD_TOKEN }],
-    ["a missing hold_token", { listing_id: LISTING_ID }],
-    ["a non-uuid hold_token", { listing_id: LISTING_ID, hold_token: "h" }],
+    ["a non-uuid listing_id", { listing_id: "abc", hold_token: HOLD_TOKEN, app_scope: APP_SCOPE }],
+    ["a missing hold_token", { listing_id: LISTING_ID, app_scope: APP_SCOPE }],
+    ["a non-uuid hold_token", { listing_id: LISTING_ID, hold_token: "h", app_scope: APP_SCOPE }],
+    [
+      "a missing app_scope",
+      { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, seller_account_id: "acct_seller_1" },
+    ],
+    [
+      "another deployment's app_scope",
+      {
+        listing_id: LISTING_ID,
+        hold_token: HOLD_TOKEN,
+        seller_account_id: "acct_seller_1",
+        app_scope: "other.supabase.co",
+      },
+    ],
   ])("ignores a paid session with %s", async (_label, metadata) => {
     retrieve.mockResolvedValue(session({ metadata }));
     const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"]);
@@ -195,10 +216,48 @@ describe("fulfillCheckoutSession", () => {
     expect(console.warn).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores another deployment's session even when its listing is missing here", async () => {
+    retrieve.mockResolvedValue(
+      session({
+        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "other.supabase.co" },
+      }),
+    );
+    const { admin, rpcCalls, listingQueries } = fakeAdmin([], { listingExists: false });
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result).toEqual({ outcome: "ignored", listingId: null, amountCents: 1999 });
+    expect(listingQueries).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+    expect(refundCreate).not.toHaveBeenCalled();
+  });
+
+  it("ignores an unpaid session from another deployment", async () => {
+    retrieve.mockResolvedValue(
+      session({ paid: false, metadata: { listing_id: LISTING_ID, app_scope: "other.supabase.co" } }),
+    );
+    const { admin, rpcCalls } = fakeAdmin([]);
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result.outcome).toBe("ignored");
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("ignores every session when this deployment has no app scope", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"]);
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result.outcome).toBe("ignored");
+    expect(listingQueries).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+    expect(refundCreate).not.toHaveBeenCalled();
+  });
+
   it("refunds without recording an order when the listing was deleted", async () => {
     const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"], { listingExists: false });
     const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result).toEqual({ outcome: "refunded", listingId: LISTING_ID, amountCents: 1999 });
+    expect(result).toEqual({
+      outcome: "refunded_unavailable",
+      listingId: LISTING_ID,
+      amountCents: 1999,
+    });
     expect(listingQueries).toEqual([{ table: "listings", column: "id", value: LISTING_ID }]);
     expect(refundCreate).toHaveBeenCalledWith(
       { payment_intent: "pi_test_1", reverse_transfer: true, refund_application_fee: true },

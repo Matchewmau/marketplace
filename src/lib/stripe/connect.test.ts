@@ -7,6 +7,7 @@ import {
   createSellerAccount,
   normalizeAccountStatus,
   refreshSellerAccount,
+  safeErrorMessage,
   SellerAccountMissingError,
   unbindSellerAccount,
 } from "@/lib/stripe/connect";
@@ -344,5 +345,33 @@ describe("refreshSellerAccount", () => {
     expect(error).toBeInstanceOf(SellerAccountMissingError);
     expect((error as SellerAccountMissingError).accountId).toBe("acct_gone");
     expect(updates).toEqual([]);
+  });
+});
+
+describe("safeErrorMessage", () => {
+  it("redacts Stripe keys", () => {
+    expect(safeErrorMessage(new Error("bad sk_test_abc123 and whsec_xyz"))).toBe(
+      "bad [redacted] and [redacted]",
+    );
+  });
+
+  it("redacts Supabase secret and publishable keys", () => {
+    expect(
+      safeErrorMessage("keys sb_secret_AbC-12_x and sb_publishable_Zz9-y_1 leaked"),
+    ).toBe("keys [redacted] and [redacted] leaked");
+  });
+
+  it("redacts JWT-shaped strings such as legacy Supabase keys", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.sig-Abc_123";
+    expect(safeErrorMessage(new Error(`Invalid key ${jwt} given`))).toBe(
+      "Invalid key [redacted] given",
+    );
+    expect(safeErrorMessage("unsigned eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.")).toBe(
+      "unsigned [redacted]",
+    );
+  });
+
+  it("leaves ordinary messages untouched", () => {
+    expect(safeErrorMessage(new Error("db down"))).toBe("db down");
   });
 });
