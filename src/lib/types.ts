@@ -10,6 +10,8 @@ export type Listing = {
   location: string | null;
   created_at: string;
   updated_at: string;
+  status: "active" | "sold";
+  sold_at: string | null;
 };
 
 export type Message = {
@@ -37,3 +39,7 @@ export type FilterState = {
   location: string;
   sort: SortOption;
 };
+
+export type SellerPaymentStatus = { stripe_account_id: string; charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean };
+export type PurchaseBlockReason = "free" | "below_minimum" | "above_maximum" | "sold" | "reserved" | "seller_not_onboarded" | "payments_unavailable";
+export type PurchaseState = { buyable: true; amountCents: number } | { buyable: false; reason: PurchaseBlockReason };
