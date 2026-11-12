@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+# local HTTPS certificates from `next dev --experimental-https`
+/certificates
 
 # debug
 npm-debug.log*

@@ -101,7 +101,8 @@ Stripe variables (all server-only):
 | `APP_URL` | Origin used for Stripe redirect URLs. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, leave it unset (the request origin is used) or set it to the production URL. |
 
 The Stripe publishable key is not needed because the app uses Stripe-hosted
-Checkout.
+Checkout. Replace the placeholders with real sandbox values: the server rejects
+the placeholder key and payments stay disabled until you do.
 
 ### 3. Set up Supabase
 
@@ -279,9 +280,9 @@ All are executable by `service_role` only.
 | `POST` | `/api/upload` | Multipart form-data with `file` (JPEG, PNG, or WebP, max 4 MB). Returns `201 { url }`. |
 | `GET` | `/api/messages` | Seller inbox. Query param: `sellerEmail`. Returns `{ messages }`, newest first, capped at 100, with listing title, image, and price. `400` for a missing or invalid email; `500` when the service-role key is absent or Supabase fails. |
 | `POST` | `/api/messages` | Send a message. Body: `listing_id`, `buyer_email`, `message`. Returns `201 { message }`, `400` on validation failure, or `404` when the listing is missing. Messages appear in the seller inbox but no automatic email is sent. |
-| `POST` | `/api/stripe/connect/onboard` | Start or resume seller onboarding. Body: `{ email }`. Returns `{ url }` (Stripe onboarding link) while details are still needed, or `{ status }` (`charges_enabled`, `payouts_enabled`, `details_submitted`) once the seller has submitted everything. `400` for an invalid email, `409` if the linked Stripe account no longer exists, `502` on Stripe errors, `503` when payments are not configured. |
-| `GET` | `/api/stripe/connect/status` | Seller payout status. Query param: `email`. Returns `{ status }` with the three flags above, or `{ status: null }` when the email has not started onboarding. Not cached. `400`, `502`, `503` as above. |
-| `POST` | `/api/checkout` | Start Checkout for a listing. Body: `{ listingId, holdToken? }`. The amount comes from the database, never the client. Returns `{ url, holdToken }` to redirect to Stripe Checkout (passing the previous `holdToken` resumes an open session). Blocked purchases return `409 { error, reason }` with a reason from the list above; also `400`, `404`, `502`, `503`. |
+| `POST` | `/api/stripe/connect/onboard` | Start or resume seller onboarding. Body: `{ email }`. Returns `{ url }` (Stripe onboarding link) while details are still needed, or `{ status }` (`charges_enabled`, `payouts_enabled`, `details_submitted`) once the seller has submitted everything. `400` for an invalid email, `409` if the linked Stripe account no longer exists, `500` on database errors, `502` on Stripe errors, `503` when payments are not configured. |
+| `GET` | `/api/stripe/connect/status` | Seller payout status. Query param: `email`. Returns `{ status }` with the three flags above, or `{ status: null }` when the email has not started onboarding. Not cached. `400`, `500`, `502`, `503` as above. |
+| `POST` | `/api/checkout` | Start Checkout for a listing. Body: `{ listingId, holdToken? }`. The amount comes from the database, never the client. Returns `{ url, holdToken }` to redirect to Stripe Checkout (passing the previous `holdToken` resumes an open session). Blocked purchases return `409 { error, reason }` with a reason from the list above; also `400`, `404`, `500`, `502`, `503`. |
 | `POST` | `/api/stripe/webhook` | Stripe webhook. Verifies the `stripe-signature` header, then handles `checkout.session.completed` and `checkout.session.async_payment_succeeded` (record the order) and `checkout.session.expired` (release the hold). Returns `{ received: true }`; `400` for a missing or invalid signature, `500` so Stripe retries on failure, `503` when not configured. |
 
 Validation errors return `{ error: string }` with status `400`. Storage or
@@ -299,7 +300,8 @@ database failures return `500`.
 4. In the Stripe Dashboard, create a webhook endpoint for the **production**
    URL `/api/stripe/webhook` with the events `checkout.session.completed`,
    `checkout.session.async_payment_succeeded`, and `checkout.session.expired`.
-   Put its signing secret in `STRIPE_WEBHOOK_SECRET`. Preview deployments sit
+   Listen to events on your own account only (not "Connected accounts"), as
+   snapshot events. Put its signing secret in `STRIPE_WEBHOOK_SECRET`. Preview deployments sit
    behind Vercel deployment protection, so Stripe cannot reach their webhooks.
 5. Deploy. Pushing to `main` triggers a new production deployment.
 6. Smoke-test the deployment: browse and search, create a listing with a photo,
@@ -336,7 +338,11 @@ on every push and pull request with read-only repository permissions.
 - Payouts are keyed by the typed seller email, with no login. Anyone can claim
   an email that has not onboarded yet, so this is sandbox/demo only and needs
   real authentication before any live use.
-- No rate limiting on the onboarding and status endpoints.
+- No rate limiting on the onboarding, status, and checkout endpoints. Anyone
+  can keep a listing reserved by starting a new checkout every 30–40 minutes.
+- Once a seller has submitted their details, the app stops issuing onboarding
+  links for that email. If Stripe later asks for more information, the seller
+  has to update it through Stripe directly.
 - No refund UI. Refunds only happen automatically when a second payment lands
   on an already-sold listing.
 - Sold listings stay visible with a “Sold” badge.
