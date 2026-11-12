@@ -6,6 +6,7 @@ import { StripeConfigError } from "@/lib/stripe/config";
 import {
   refreshSellerAccount,
   safeErrorMessage,
+  SellerAccountMissingError,
   toPublicSellerStatus,
   unbindSellerAccount,
 } from "@/lib/stripe/connect";
@@ -29,7 +30,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
   }
 
-  const admin = getSupabaseAdmin();
+  let admin: ReturnType<typeof getSupabaseAdmin>;
+  try {
+    admin = getSupabaseAdmin();
+  } catch (err) {
+    return serverError(safeErrorMessage(err));
+  }
   let stripe: Stripe;
   try {
     stripe = getStripe();
@@ -50,16 +56,16 @@ export async function GET(request: Request) {
       { headers: NO_STORE },
     );
   } catch (err) {
-    if (err instanceof Stripe.errors.StripeError) {
-      // Only a bound account is ever retrieved, so a missing resource means the binding is stale.
-      if (err.code === "resource_missing") {
-        try {
-          await unbindSellerAccount(admin, email);
-        } catch (unbindErr) {
-          return serverError(safeErrorMessage(unbindErr));
-        }
-        return NextResponse.json({ status: null }, { headers: NO_STORE });
+    // The bound account is gone from Stripe, so the binding to that account id is stale.
+    if (err instanceof SellerAccountMissingError) {
+      try {
+        await unbindSellerAccount(admin, email, err.accountId);
+      } catch (unbindErr) {
+        return serverError(safeErrorMessage(unbindErr));
       }
+      return NextResponse.json({ status: null }, { headers: NO_STORE });
+    }
+    if (err instanceof Stripe.errors.StripeError) {
       console.error(LOG_PREFIX, safeErrorMessage(err), {
         type: err.type,
         code: err.code,

@@ -49,12 +49,22 @@ function fakeAdmin(tables: Record<string, Row[]>, rpcResults: Record<string, unk
     from(table: string) {
       return {
         select: (columns: string) => query(table, columns),
-        update: (patch: Row) => ({
-          eq: async (column: string, value: unknown) => {
-            for (const r of tables[table] ?? []) if (r[column] === value) Object.assign(r, patch);
-            return { error: null };
-          },
-        }),
+        update: (patch: Row) => {
+          const filters: Array<(row: Row) => boolean> = [];
+          const builder = {
+            eq(column: string, value: unknown) {
+              filters.push((row) => row[column] === value);
+              return builder;
+            },
+            then<T>(resolve: (value: { error: null }) => T) {
+              for (const r of tables[table] ?? []) {
+                if (filters.every((f) => f(r))) Object.assign(r, patch);
+              }
+              return Promise.resolve({ error: null }).then(resolve);
+            },
+          };
+          return builder;
+        },
       };
     },
     async rpc(name: string, args: Record<string, unknown>) {

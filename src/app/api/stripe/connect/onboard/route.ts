@@ -8,6 +8,7 @@ import {
   createSellerAccount,
   refreshSellerAccount,
   safeErrorMessage,
+  SellerAccountMissingError,
   toPublicSellerStatus,
   unbindSellerAccount,
 } from "@/lib/stripe/connect";
@@ -43,7 +44,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
   }
 
-  const admin = getSupabaseAdmin();
+  let admin: ReturnType<typeof getSupabaseAdmin>;
+  try {
+    admin = getSupabaseAdmin();
+  } catch (err) {
+    return serverError(safeErrorMessage(err));
+  }
   let stripe: Stripe;
   try {
     stripe = getStripe();
@@ -56,16 +62,17 @@ export async function POST(request: Request) {
   if (!admin) {
     return NextResponse.json({ error: "Payments are not configured." }, { status: 503 });
   }
+  const db = admin;
 
   const loadRow = async () =>
-    admin
+    db
       .from("seller_accounts")
       .select("stripe_account_id, details_submitted")
       .eq("seller_email", email)
       .maybeSingle();
 
-  // Set once the email is bound to a connected account in seller_accounts.
-  let bound = false;
+  // The connected account this email is bound to in seller_accounts, once known.
+  let boundAccountId: string | null = null;
 
   try {
     const { data: row, error } = await loadRow();
@@ -77,30 +84,29 @@ export async function POST(request: Request) {
     if (row) {
       // Re-read from Stripe first: a seller who finished onboarding but never hit the
       // return URL must not be handed a fresh link.
-      bound = true;
-      refreshed = await refreshSellerAccount(stripe, admin, email);
+      boundAccountId = (row as SellerAccountRow).stripe_account_id;
+      refreshed = await refreshSellerAccount(stripe, db, email);
       if (!refreshed) {
         return serverError("seller account row disappeared during refresh");
       }
     }
 
+    let status: SellerPaymentStatus | null = refreshed;
     let decision = decideOnboarding(refreshed);
     let accountId: string;
 
     if (decision.action === "create") {
-      accountId = await createSellerAccount(stripe, email);
-      const { error: insertError } = await admin
+      const created = await createSellerAccount(stripe, email);
+      const createdRow: SellerPaymentStatus = { stripe_account_id: created.id, ...created.flags };
+      const { error: insertError } = await db
         .from("seller_accounts")
-        .insert({ seller_email: email, stripe_account_id: accountId });
+        .insert({ seller_email: email, ...createdRow });
 
       if (insertError) {
         if (insertError.code !== "23505") {
           return serverError(insertError.message);
         }
-        // Another request bound this email first; the account just created is an orphan (sandbox only).
-        console.warn("stripe connect onboard: orphaned connected account after claim race", {
-          accountId,
-        });
+        // Another request bound this email first.
         const { data: winner, error: reloadError } = await loadRow();
         if (reloadError || !winner) {
           return serverError(reloadError?.message ?? "claim race winner row not found");
@@ -109,36 +115,52 @@ export async function POST(request: Request) {
         if (decision.action === "create") {
           return serverError("claim race produced no bound account");
         }
+        if (decision.accountId !== created.id) {
+          // The account just created is an orphan (sandbox only).
+          console.warn("stripe connect onboard: orphaned connected account after claim race", {
+            accountId: created.id,
+          });
+        }
         accountId = decision.accountId;
+      } else {
+        // Decide on the flags actually stored: an already-attested account gets no link.
+        decision = decideOnboarding(createdRow);
+        accountId = created.id;
+        status = createdRow;
       }
-      bound = true;
+      boundAccountId = accountId;
     } else {
       accountId = decision.accountId;
     }
 
     if (decision.action === "status_only") {
-      const status = refreshed ?? (await refreshSellerAccount(stripe, admin, email));
+      status = status ?? (await refreshSellerAccount(stripe, db, email));
       return NextResponse.json({ status: status ? toPublicSellerStatus(status) : null });
     }
 
     const url = await createOnboardingLink(stripe, accountId, getAppOrigin(request));
     return NextResponse.json({ url });
   } catch (err) {
-    if (err instanceof Stripe.errors.StripeError) {
-      if (bound && err.code === "resource_missing") {
-        try {
-          await unbindSellerAccount(admin, email);
-        } catch (unbindErr) {
-          return serverError(safeErrorMessage(unbindErr));
-        }
-        return NextResponse.json(
-          {
-            error:
-              "The Stripe account linked to this email no longer exists. Start setup again.",
-          },
-          { status: 409 },
-        );
+    const missingAccountId =
+      err instanceof SellerAccountMissingError
+        ? err.accountId
+        : err instanceof Stripe.errors.StripeError && err.code === "resource_missing"
+          ? boundAccountId
+          : null;
+    if (missingAccountId) {
+      try {
+        await unbindSellerAccount(db, email, missingAccountId);
+      } catch (unbindErr) {
+        return serverError(safeErrorMessage(unbindErr));
       }
+      return NextResponse.json(
+        {
+          error: "The Stripe account linked to this email no longer exists. Start setup again.",
+        },
+        { status: 409 },
+      );
+    }
+    if (err instanceof Stripe.errors.StripeError) {
       console.error(LOG_PREFIX, safeErrorMessage(err), {
         type: err.type,
         code: err.code,

@@ -20,8 +20,29 @@ type Row = {
   details_submitted: boolean;
 };
 
+type EqCall = [keyof Row, string];
+
+/** Thenable filter chain: applies the action to rows matching every .eq() once awaited. */
+function filterChain(rows: Row[], calls: EqCall[][], apply: (index: number) => void) {
+  const filters: EqCall[] = [];
+  calls.push(filters);
+  const builder = {
+    eq(column: keyof Row, value: string) {
+      filters.push([column, value]);
+      return builder;
+    },
+    then<T>(resolve: (value: { error: null }) => T) {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (filters.every(([c, v]) => rows[i][c] === v)) apply(i);
+      }
+      return Promise.resolve({ error: null }).then(resolve);
+    },
+  };
+  return builder;
+}
+
 /** Minimal chainable fake of the seller_accounts queries used by the route. */
-function fakeAdmin(rows: Row[]) {
+function fakeAdmin(rows: Row[], deleteCalls: EqCall[][] = [], updateCalls: EqCall[][] = []) {
   return {
     from(table: string) {
       if (table !== "seller_accounts") throw new Error(`unexpected table ${table}`);
@@ -38,20 +59,9 @@ function fakeAdmin(rows: Row[]) {
             },
           }),
         }),
-        update: (patch: Partial<Row>) => ({
-          eq: async (column: keyof Row, value: string) => {
-            for (const r of rows) if (r[column] === value) Object.assign(r, patch);
-            return { error: null };
-          },
-        }),
-        delete: () => ({
-          eq: async (column: keyof Row, value: string) => {
-            for (let i = rows.length - 1; i >= 0; i--) {
-              if (rows[i][column] === value) rows.splice(i, 1);
-            }
-            return { error: null };
-          },
-        }),
+        update: (patch: Partial<Row>) =>
+          filterChain(rows, updateCalls, (i) => Object.assign(rows[i], patch)),
+        delete: () => filterChain(rows, deleteCalls, (i) => rows.splice(i, 1)),
       };
     },
   };
@@ -120,8 +130,9 @@ describe("GET /api/stripe/connect/status", () => {
         details_submitted: false,
       },
     ];
+    const updateCalls: EqCall[][] = [];
     vi.mocked(getSupabaseAdmin).mockReturnValue(
-      fakeAdmin(rows) as unknown as ReturnType<typeof getSupabaseAdmin>,
+      fakeAdmin(rows, [], updateCalls) as unknown as ReturnType<typeof getSupabaseAdmin>,
     );
 
     const res = await GET(get("Seller@Example.com"));
@@ -137,8 +148,14 @@ describe("GET /api/stripe/connect/status", () => {
     expect(text).not.toContain("stripe_account_id");
     expect(text).not.toContain("acct_known");
     expect(retrieve).toHaveBeenCalledWith("acct_known", {
-      include: ["configuration.recipient", "requirements"],
+      include: ["configuration.recipient", "identity", "requirements"],
     });
+    expect(updateCalls).toEqual([
+      [
+        ["seller_email", "seller@example.com"],
+        ["stripe_account_id", "acct_known"],
+      ],
+    ]);
     expect(rows[0]).toEqual({
       seller_email: "seller@example.com",
       stripe_account_id: "acct_known",
@@ -156,9 +173,11 @@ describe("GET /api/stripe/connect/status", () => {
         details_submitted: false,
       },
     ];
+    const deleteCalls: EqCall[][] = [];
     vi.mocked(getSupabaseAdmin).mockReturnValue(
-      fakeAdmin(rows) as unknown as ReturnType<typeof getSupabaseAdmin>,
+      fakeAdmin(rows, deleteCalls) as unknown as ReturnType<typeof getSupabaseAdmin>,
     );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     retrieve.mockRejectedValue(
       new Stripe.errors.StripeInvalidRequestError({
         code: "resource_missing",
@@ -172,5 +191,29 @@ describe("GET /api/stripe/connect/status", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: null });
     expect(rows).toEqual([]);
+    expect(deleteCalls).toEqual([
+      [
+        ["seller_email", "seller@example.com"],
+        ["stripe_account_id", "acct_gone"],
+      ],
+    ]);
+    expect(warn).toHaveBeenCalledWith("stripe connect: unbinding missing account", {
+      accountId: "acct_gone",
+    });
+    warn.mockRestore();
+  });
+
+  it("returns 500 with a redacted log when the admin client throws", async () => {
+    vi.mocked(getSupabaseAdmin).mockImplementation(() => {
+      throw new Error("bad key sk_test_secret123");
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await GET(get("seller@example.com"));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Could not load payout settings." });
+    expect(error).toHaveBeenCalledWith("stripe connect status failed:", "bad key [redacted]");
+    error.mockRestore();
   });
 });

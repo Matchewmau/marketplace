@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -7,6 +7,8 @@ import {
   createSellerAccount,
   normalizeAccountStatus,
   refreshSellerAccount,
+  SellerAccountMissingError,
+  unbindSellerAccount,
 } from "@/lib/stripe/connect";
 
 type Capability = { status: string; status_details: unknown[] };
@@ -18,6 +20,7 @@ function account(opts: {
   requirements?: boolean | null;
   dueStatuses?: string[];
   awaiting?: "user" | "stripe";
+  tos?: boolean;
 }): Stripe.V2.Core.Account {
   const stripeBalance: { stripe_transfers?: Capability; payouts?: Capability } = {};
   if (opts.transfers) stripeBalance.stripe_transfers = { status: opts.transfers, status_details: [] };
@@ -29,6 +32,9 @@ function account(opts: {
     applied_configurations: opts.recipient === false ? [] : ["recipient"],
     created: "2026-11-12T00:00:00.000Z",
     livemode: false,
+    identity: opts.tos
+      ? { attestations: { terms_of_service: { account: { date: "2026-11-12T00:00:00.000Z" } } } }
+      : { attestations: { terms_of_service: { account: null } } },
     configuration:
       opts.recipient === false
         ? {}
@@ -98,6 +104,24 @@ describe("normalizeAccountStatus", () => {
     expect(normalizeAccountStatus(account({})).details_submitted).toBe(false);
   });
 
+  it("reports details submitted once terms of service are attested despite a user-due entry", () => {
+    expect(
+      normalizeAccountStatus(
+        account({ transfers: "pending", dueStatuses: ["currently_due"], tos: true }),
+      ),
+    ).toEqual({ charges_enabled: false, payouts_enabled: false, details_submitted: true });
+    expect(
+      normalizeAccountStatus(account({ recipient: false, tos: true })).details_submitted,
+    ).toBe(true);
+  });
+
+  it("does not treat a missing attestation date as submitted", () => {
+    expect(
+      normalizeAccountStatus(account({ transfers: "pending", dueStatuses: ["currently_due"] }))
+        .details_submitted,
+    ).toBe(false);
+  });
+
   it("is all false without a recipient configuration", () => {
     expect(normalizeAccountStatus(account({ recipient: false }))).toEqual({
       charges_enabled: false,
@@ -119,11 +143,14 @@ describe("normalizeAccountStatus", () => {
 });
 
 describe("createSellerAccount", () => {
-  it("creates an express recipient account and returns its id", async () => {
+  it("creates an express recipient account and returns its id and flags", async () => {
     const create = vi.fn().mockResolvedValue({ id: "acct_new_1" });
     const stripe = { v2: { core: { accounts: { create } } } } as unknown as Stripe;
 
-    await expect(createSellerAccount(stripe, "seller@example.com")).resolves.toBe("acct_new_1");
+    await expect(createSellerAccount(stripe, "seller@example.com")).resolves.toEqual({
+      id: "acct_new_1",
+      flags: { charges_enabled: false, payouts_enabled: false, details_submitted: false },
+    });
 
     expect(create).toHaveBeenCalledTimes(1);
     const params = create.mock.calls[0][0];
@@ -137,19 +164,74 @@ describe("createSellerAccount", () => {
       losses_collector: "application",
     });
     expect(params.include).toEqual([...ACCOUNT_INCLUDE]);
-    expect(params.include).toEqual(["configuration.recipient", "requirements"]);
+    expect(params.include).toEqual(["configuration.recipient", "identity", "requirements"]);
     expect(params.identity.country).toBe("us");
     expect(params.display_name).toBe("seller@example.com");
     expect(params.metadata).toEqual({ seller_email: "seller@example.com" });
-    expect(create.mock.calls[0][1]).toEqual({
-      idempotencyKey: "seller-account:seller@example.com",
+    // No idempotency key: a replay would resurrect a deleted account after an unbind.
+    expect(create.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("returns submitted flags for an account that is already attested", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValue(account({ transfers: "pending", dueStatuses: ["currently_due"], tos: true }));
+    const stripe = { v2: { core: { accounts: { create } } } } as unknown as Stripe;
+
+    const created = await createSellerAccount(stripe, "seller@example.com");
+
+    expect(created.flags.details_submitted).toBe(true);
+  });
+});
+
+describe("unbindSellerAccount", () => {
+  it("deletes only the row binding the email to the missing account and logs the id", async () => {
+    const eqCalls: Array<[string, string]> = [];
+    const builder = {
+      eq(column: string, value: string) {
+        eqCalls.push([column, value]);
+        return builder;
+      },
+      then<T>(resolve: (value: { error: null }) => T) {
+        return Promise.resolve({ error: null }).then(resolve);
+      },
+    };
+    const admin = { from: () => ({ delete: () => builder }) } as unknown as SupabaseClient;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await unbindSellerAccount(admin, "seller@example.com", "acct_gone");
+
+    expect(eqCalls).toEqual([
+      ["seller_email", "seller@example.com"],
+      ["stripe_account_id", "acct_gone"],
+    ]);
+    expect(warn).toHaveBeenCalledWith("stripe connect: unbinding missing account", {
+      accountId: "acct_gone",
     });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("seller@example.com");
+    warn.mockRestore();
+  });
+
+  it("throws when the delete fails", async () => {
+    const builder = {
+      eq: () => builder,
+      then<T>(resolve: (value: { error: { message: string } }) => T) {
+        return Promise.resolve({ error: { message: "db down" } }).then(resolve);
+      },
+    };
+    const admin = { from: () => ({ delete: () => builder }) } as unknown as SupabaseClient;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(unbindSellerAccount(admin, "seller@example.com", "acct_gone")).rejects.toThrow(
+      "Failed to unbind seller account: db down",
+    );
   });
 });
 
 describe("refreshSellerAccount", () => {
   function fakeAdmin(row: { stripe_account_id: string; details_submitted: boolean }) {
     const updates: Record<string, unknown>[] = [];
+    const updateFilters: Array<Array<[string, string]>> = [];
     const selected: string[] = [];
     const admin = {
       from: () => ({
@@ -161,11 +243,22 @@ describe("refreshSellerAccount", () => {
         },
         update: (patch: Record<string, unknown>) => {
           updates.push(patch);
-          return { eq: async () => ({ error: null }) };
+          const filters: Array<[string, string]> = [];
+          updateFilters.push(filters);
+          const builder = {
+            eq(column: string, value: string) {
+              filters.push([column, value]);
+              return builder;
+            },
+            then<T>(resolve: (value: { error: null }) => T) {
+              return Promise.resolve({ error: null }).then(resolve);
+            },
+          };
+          return builder;
         },
       }),
     };
-    return { admin: admin as unknown as SupabaseClient, updates, selected };
+    return { admin: admin as unknown as SupabaseClient, updates, updateFilters, selected };
   }
 
   it("keeps details_submitted true once set even if Stripe now reports otherwise", async () => {
@@ -181,6 +274,9 @@ describe("refreshSellerAccount", () => {
     const status = await refreshSellerAccount(stripe, admin, "seller@example.com");
 
     expect(selected[0]).toContain("details_submitted");
+    expect(retrieve).toHaveBeenCalledWith("acct_sticky", {
+      include: ["configuration.recipient", "identity", "requirements"],
+    });
     expect(status).toEqual({
       stripe_account_id: "acct_sticky",
       charges_enabled: false,
@@ -192,7 +288,7 @@ describe("refreshSellerAccount", () => {
     ]);
   });
 
-  it("stores the fresh value when details were not previously submitted", async () => {
+  it("never writes details_submitted false when details are not yet submitted", async () => {
     const { admin, updates } = fakeAdmin({
       stripe_account_id: "acct_new",
       details_submitted: false,
@@ -205,6 +301,48 @@ describe("refreshSellerAccount", () => {
     const status = await refreshSellerAccount(stripe, admin, "seller@example.com");
 
     expect(status?.details_submitted).toBe(false);
-    expect(updates[0]).toMatchObject({ details_submitted: false });
+    expect(updates).toEqual([{ charges_enabled: false, payouts_enabled: false }]);
+    expect(updates[0]).not.toHaveProperty("details_submitted");
+  });
+
+  it("scopes the update to both the email and the bound account id", async () => {
+    const { admin, updateFilters } = fakeAdmin({
+      stripe_account_id: "acct_bound",
+      details_submitted: false,
+    });
+    const retrieve = vi.fn().mockResolvedValue(account({ transfers: "active" }));
+    const stripe = { v2: { core: { accounts: { retrieve } } } } as unknown as Stripe;
+
+    await refreshSellerAccount(stripe, admin, "seller@example.com");
+
+    expect(updateFilters).toEqual([
+      [
+        ["seller_email", "seller@example.com"],
+        ["stripe_account_id", "acct_bound"],
+      ],
+    ]);
+  });
+
+  it("throws SellerAccountMissingError with the bound id when Stripe has no such account", async () => {
+    const { admin, updates } = fakeAdmin({
+      stripe_account_id: "acct_gone",
+      details_submitted: true,
+    });
+    const retrieve = vi.fn().mockRejectedValue(
+      new Stripe.errors.StripeInvalidRequestError({
+        code: "resource_missing",
+        message: "No such account",
+        type: "invalid_request_error",
+      }),
+    );
+    const stripe = { v2: { core: { accounts: { retrieve } } } } as unknown as Stripe;
+
+    const error = await refreshSellerAccount(stripe, admin, "seller@example.com").catch(
+      (err: unknown) => err,
+    );
+
+    expect(error).toBeInstanceOf(SellerAccountMissingError);
+    expect((error as SellerAccountMissingError).accountId).toBe("acct_gone");
+    expect(updates).toEqual([]);
   });
 });

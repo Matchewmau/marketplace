@@ -22,6 +22,26 @@ type Row = {
 };
 
 type DbError = { code: string; message: string };
+type EqCall = [keyof Row, string];
+
+/** Thenable filter chain: applies the action to rows matching every .eq() once awaited. */
+function filterChain(rows: Row[], calls: EqCall[][], apply: (index: number) => void) {
+  const filters: EqCall[] = [];
+  calls.push(filters);
+  const builder = {
+    eq(column: keyof Row, value: string) {
+      filters.push([column, value]);
+      return builder;
+    },
+    then<T>(resolve: (value: { error: null }) => T) {
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (filters.every(([c, v]) => rows[i][c] === v)) apply(i);
+      }
+      return Promise.resolve({ error: null }).then(resolve);
+    },
+  };
+  return builder;
+}
 
 /** Minimal chainable fake of the seller_accounts queries used by the route. */
 function fakeAdmin(
@@ -29,6 +49,9 @@ function fakeAdmin(
   hooks: { onInsert?: (row: Partial<Row>) => DbError | null; loadError?: DbError } = {},
 ) {
   const inserted: Partial<Row>[] = [];
+  const updates: Partial<Row>[] = [];
+  const updateCalls: EqCall[][] = [];
+  const deleteCalls: EqCall[][] = [];
   const admin = {
     from(table: string) {
       if (table !== "seller_accounts") throw new Error(`unexpected table ${table}`);
@@ -58,31 +81,35 @@ function fakeAdmin(
           } as Row);
           return { error: null };
         },
-        update: (patch: Partial<Row>) => ({
-          eq: async (column: keyof Row, value: string) => {
-            for (const r of rows) if (r[column] === value) Object.assign(r, patch);
-            return { error: null };
-          },
-        }),
-        delete: () => ({
-          eq: async (column: keyof Row, value: string) => {
-            for (let i = rows.length - 1; i >= 0; i--) {
-              if (rows[i][column] === value) rows.splice(i, 1);
-            }
-            return { error: null };
-          },
-        }),
+        update: (patch: Partial<Row>) => {
+          updates.push(patch);
+          return filterChain(rows, updateCalls, (i) => Object.assign(rows[i], patch));
+        },
+        delete: () => filterChain(rows, deleteCalls, (i) => rows.splice(i, 1)),
       };
     },
   };
-  return { admin, inserted };
+  return { admin, inserted, updates, updateCalls, deleteCalls };
 }
 
-/** A retrieved v2 account; `userDue` adds a currently_due requirement awaiting the user. */
-function accountResponse(id: string, opts: { transfers?: string; userDue?: boolean } = {}) {
+/**
+ * A retrieved v2 account; `userDue` adds a currently_due requirement awaiting the user and
+ * `attested` sets the terms-of-service attestation date.
+ */
+function accountResponse(
+  id: string,
+  opts: { transfers?: string; userDue?: boolean; attested?: boolean } = {},
+) {
   return {
     id,
     object: "v2.core.account",
+    identity: {
+      attestations: {
+        terms_of_service: {
+          account: opts.attested ? { date: "2026-11-12T00:00:00.000Z" } : null,
+        },
+      },
+    },
     configuration: {
       recipient: {
         applied: true,
@@ -182,7 +209,16 @@ describe("POST /api/stripe/connect/onboard", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ url: "https://connect.stripe.test/setup/acct_new" });
     expect(stripe.v2.core.accounts.create).toHaveBeenCalledTimes(1);
-    expect(inserted).toEqual([{ seller_email: "seller@example.com", stripe_account_id: "acct_new" }]);
+    expect(stripe.v2.core.accounts.create.mock.calls[0]).toHaveLength(1);
+    expect(inserted).toEqual([
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_new",
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: false,
+      },
+    ]);
     const linkParams = stripe.v2.core.accountLinks.create.mock.calls[0][0];
     expect(linkParams.use_case.type).toBe("account_onboarding");
     expect(linkParams.use_case.account_onboarding.return_url).toBe(
@@ -213,7 +249,7 @@ describe("POST /api/stripe/connect/onboard", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ url: "https://connect.stripe.test/setup/acct_existing" });
     expect(stripe.v2.core.accounts.retrieve).toHaveBeenCalledWith("acct_existing", {
-      include: ["configuration.recipient", "requirements"],
+      include: ["configuration.recipient", "identity", "requirements"],
     });
     expect(stripe.v2.core.accounts.create).not.toHaveBeenCalled();
     expect(inserted).toEqual([]);
@@ -370,7 +406,9 @@ describe("POST /api/stripe/connect/onboard", () => {
         type: "invalid_request_error",
       }),
     );
-    useAdmin(fakeAdmin(rows).admin);
+    const { admin, deleteCalls } = fakeAdmin(rows);
+    useAdmin(admin);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const res = await POST(post({ email: "seller@example.com" }));
 
@@ -379,6 +417,165 @@ describe("POST /api/stripe/connect/onboard", () => {
       error: "The Stripe account linked to this email no longer exists. Start setup again.",
     });
     expect(rows).toEqual([]);
+    expect(deleteCalls).toEqual([
+      [
+        ["seller_email", "seller@example.com"],
+        ["stripe_account_id", "acct_gone"],
+      ],
+    ]);
+    expect(warn).toHaveBeenCalledWith("stripe connect: unbinding missing account", {
+      accountId: "acct_gone",
+    });
     expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
+  });
+
+  it("does not unbind a row that was rebound to a different account", async () => {
+    const rows: Row[] = [
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_gone",
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: false,
+      },
+    ];
+    stripe.v2.core.accounts.retrieve.mockImplementation(async () => {
+      // Another request replaced the binding while this one was talking to Stripe.
+      rows[0].stripe_account_id = "acct_replacement";
+      throw new Stripe.errors.StripeInvalidRequestError({
+        code: "resource_missing",
+        message: "No such account",
+        type: "invalid_request_error",
+      });
+    });
+    useAdmin(fakeAdmin(rows).admin);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await POST(post({ email: "seller@example.com" }));
+
+    expect(res.status).toBe(409);
+    expect(rows.map((r) => r.stripe_account_id)).toEqual(["acct_replacement"]);
+  });
+
+  it("returns status without a link when terms are attested despite a user-due requirement", async () => {
+    stripe.v2.core.accounts.retrieve.mockImplementation(async (id: string) =>
+      accountResponse(id, { transfers: "pending", userDue: true, attested: true }),
+    );
+    const rows: Row[] = [
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_attested",
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: false,
+      },
+    ];
+    const { admin, updateCalls } = fakeAdmin(rows);
+    useAdmin(admin);
+
+    const res = await POST(post({ email: "seller@example.com" }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      status: { charges_enabled: false, payouts_enabled: false, details_submitted: true },
+    });
+    expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
+    expect(rows[0].details_submitted).toBe(true);
+    expect(updateCalls).toEqual([
+      [
+        ["seller_email", "seller@example.com"],
+        ["stripe_account_id", "acct_attested"],
+      ],
+    ]);
+  });
+
+  it("keeps links closed for a submitted row even if Stripe reports a user-due requirement", async () => {
+    stripe.v2.core.accounts.retrieve.mockImplementation(async (id: string) =>
+      accountResponse(id, { transfers: "pending", userDue: true }),
+    );
+    const rows: Row[] = [
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_sticky",
+        charges_enabled: true,
+        payouts_enabled: true,
+        details_submitted: true,
+      },
+    ];
+    const { admin, updates } = fakeAdmin(rows);
+    useAdmin(admin);
+
+    const res = await POST(post({ email: "seller@example.com" }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      status: { charges_enabled: false, payouts_enabled: false, details_submitted: true },
+    });
+    expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
+    expect(rows[0].details_submitted).toBe(true);
+    expect(updates.every((u) => u.details_submitted !== false)).toBe(true);
+  });
+
+  it("stores the created account's flags and returns status when it is already attested", async () => {
+    stripe.v2.core.accounts.create.mockResolvedValue(
+      accountResponse("acct_new", { transfers: "pending", userDue: true, attested: true }),
+    );
+    const { admin, inserted } = fakeAdmin([]);
+    useAdmin(admin);
+
+    const res = await POST(post({ email: "seller@example.com" }));
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({
+      status: { charges_enabled: false, payouts_enabled: false, details_submitted: true },
+    });
+    expect(text).not.toContain("acct_new");
+    expect(inserted).toEqual([
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_new",
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: true,
+      },
+    ]);
+    expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
+  });
+
+  it("does not warn about an orphan when the race winner is the account just created", async () => {
+    const rows: Row[] = [];
+    const { admin } = fakeAdmin(rows, {
+      onInsert: (row) => {
+        rows.push({
+          charges_enabled: false,
+          payouts_enabled: false,
+          details_submitted: false,
+          ...row,
+        } as Row);
+        return { code: "23505", message: "duplicate key value" };
+      },
+    });
+    useAdmin(admin);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await POST(post({ email: "seller@example.com" }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ url: "https://connect.stripe.test/setup/acct_new" });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 with a redacted log when the admin client throws", async () => {
+    vi.mocked(getSupabaseAdmin).mockImplementation(() => {
+      throw new Error("bad key sk_test_secret123");
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(post({ email: "seller@example.com" }));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Could not load payout settings." });
+    expect(error).toHaveBeenCalledWith("stripe connect onboard failed:", "bad key [redacted]");
   });
 });
