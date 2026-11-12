@@ -5,6 +5,22 @@ alter table public.listings
   add column if not exists status text not null default 'active' check (status in ('active','sold')),
   add column if not exists sold_at timestamptz;
 
+alter table public.listings drop constraint if exists listings_sold_at_matches_status;
+alter table public.listings
+  add constraint listings_sold_at_matches_status check ((status = 'sold') = (sold_at is not null));
+
+-- New listings can only be created as active (sold state is set by record_paid_order).
+drop policy if exists "Anyone can create listings" on public.listings;
+create policy "Anyone can create listings" on public.listings
+  for insert with check (status = 'active' and sold_at is null);
+
+-- Server-side RPCs read and update listings as service_role; do not rely on automatic grants.
+grant select, update on table public.listings to service_role;
+
+-- Hardening: pin search_path and keep the trigger function off the public API.
+alter function public.update_updated_at_column() set search_path = public;
+revoke execute on function public.update_updated_at_column() from public, anon, authenticated;
+
 -- Seller Stripe accounts --------------------------------------------------------
 
 create table if not exists public.seller_accounts (
@@ -24,6 +40,7 @@ for each row execute function public.update_updated_at_column();
 
 alter table public.seller_accounts enable row level security;
 revoke all on table public.seller_accounts from anon, authenticated;
+grant select, insert, update, delete on table public.seller_accounts to service_role;
 
 -- Listing holds (checkout reservations) -----------------------------------------
 
@@ -38,6 +55,7 @@ create table if not exists public.listing_holds (
 
 alter table public.listing_holds enable row level security;
 revoke all on table public.listing_holds from anon, authenticated;
+grant select, insert, update, delete on table public.listing_holds to service_role;
 
 -- Orders ------------------------------------------------------------------------
 
@@ -68,6 +86,7 @@ create index if not exists idx_orders_listing_id on public.orders(listing_id);
 
 alter table public.orders enable row level security;
 revoke all on table public.orders from anon, authenticated;
+grant select, insert, update, delete on table public.orders to service_role;
 
 -- Functions ---------------------------------------------------------------------
 
@@ -176,8 +195,8 @@ begin
       listing_id, stripe_checkout_session_id, stripe_payment_intent_id, seller_email,
       seller_stripe_account_id, buyer_email, amount_cents, application_fee_cents, status
     ) values (
-      p_listing_id, p_session_id, p_payment_intent_id, v_seller_email,
-      p_seller_account_id, p_buyer_email, p_amount_cents, p_fee_cents, 'refund_pending'
+      p_listing_id, p_session_id, p_payment_intent_id, lower(v_seller_email),
+      p_seller_account_id, p_buyer_email, p_amount_cents, coalesce(p_fee_cents, 0), 'refund_pending'
     );
     return 'refund_pending';
   end if;
@@ -186,8 +205,8 @@ begin
     listing_id, stripe_checkout_session_id, stripe_payment_intent_id, seller_email,
     seller_stripe_account_id, buyer_email, amount_cents, application_fee_cents, status
   ) values (
-    p_listing_id, p_session_id, p_payment_intent_id, v_seller_email,
-    p_seller_account_id, p_buyer_email, p_amount_cents, p_fee_cents, 'paid'
+    p_listing_id, p_session_id, p_payment_intent_id, lower(v_seller_email),
+    p_seller_account_id, p_buyer_email, p_amount_cents, coalesce(p_fee_cents, 0), 'paid'
   );
 
   update public.listings set status = 'sold', sold_at = now() where id = p_listing_id;

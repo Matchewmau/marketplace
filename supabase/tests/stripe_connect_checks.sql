@@ -2,13 +2,16 @@
 -- Paste into the Supabase SQL editor AFTER applying
 -- supabase/migrations/20261112000000_stripe_connect.sql.
 -- Everything runs inside a transaction that is rolled back, so no data is left behind.
--- Success: notice "ALL CHECKS PASSED". Failure: an exception describing the failed check.
+-- Success: the final result set shows "ALL CHECKS PASSED" (the SQL editor only displays the
+-- last statement's result; any failed check raises and aborts the batch before it).
+-- Failure: an exception describing the failed check.
 
 begin;
 
 do $$
 declare
   v_listing_id uuid;
+  v_listing2_id uuid;
   v_token_a uuid := gen_random_uuid();
   v_token_b uuid := gen_random_uuid();
   v_bool boolean;
@@ -16,10 +19,50 @@ declare
   v_status text;
   v_sold_at timestamptz;
   v_count integer;
+  v_fee integer;
+  v_email text;
+  v_refund_id text;
+  v_session text;
+  v_ts timestamptz;
+  v_role text;
+  v_sig text;
+  v_tbl text;
+  v_priv text;
 begin
   insert into public.listings (title, price, category, seller_email)
   values ('Stripe check listing', 25.00, 'Test', 'seller@example.com')
   returning id into v_listing_id;
+
+  -- Constraint: a sold listing must have sold_at (and vice versa), even for the owner.
+  begin
+    insert into public.listings (title, price, category, seller_email, status)
+    values ('Bad sold listing', 1.00, 'Test', 'seller@example.com', 'sold');
+    raise exception 'CHECK FAILED: sold listing without sold_at should violate listings_sold_at_matches_status';
+  exception when check_violation then
+    null;
+  end;
+
+  -- Anon may create active listings but not sold ones.
+  set local role anon;
+  begin
+    insert into public.listings (title, price, category, seller_email)
+    values ('Anon active listing', 5.00, 'Test', 'anon-seller@example.com');
+  exception when others then
+    reset role;
+    raise exception 'CHECK FAILED: anon should be able to insert an active listing (%)', sqlerrm;
+  end;
+  begin
+    insert into public.listings (title, price, category, seller_email, status, sold_at)
+    values ('Anon sold listing', 5.00, 'Test', 'anon-seller@example.com', 'sold', now());
+    reset role;
+    raise exception 'CHECK FAILED: anon must not insert a sold listing';
+  exception when insufficient_privilege then
+    null;
+  end;
+  reset role;
+
+  -- Business-logic functions run as service_role, like the server's service-role client.
+  set local role service_role;
 
   -- Reservation: first hold wins, second is rejected while the first is live.
   v_bool := public.reserve_listing(v_listing_id, v_token_a, 2400);
@@ -37,6 +80,25 @@ begin
   v_bool := public.reserve_listing(v_listing_id, v_token_b, 2400);
   if v_bool is distinct from true then
     raise exception 'CHECK FAILED: reserve_listing after hold expiry should return true, got %', v_bool;
+  end if;
+
+  -- attach/release with a non-matching token do nothing.
+  perform public.attach_hold_session(v_listing_id, v_token_a, 'cs_wrong', 'https://wrong.example');
+  select checkout_session_id into v_session from public.listing_holds where listing_id = v_listing_id;
+  if v_session is not null then
+    raise exception 'CHECK FAILED: attach_hold_session with wrong token must not set session, got %', v_session;
+  end if;
+
+  perform public.release_listing_hold(v_listing_id, v_token_a);
+  select count(*) into v_count from public.listing_holds where listing_id = v_listing_id;
+  if v_count <> 1 then
+    raise exception 'CHECK FAILED: release_listing_hold with wrong token must keep the hold, found %', v_count;
+  end if;
+
+  perform public.attach_hold_session(v_listing_id, v_token_b, 'cs_test_1', 'https://ok.example');
+  select checkout_session_id into v_session from public.listing_holds where listing_id = v_listing_id;
+  if v_session is distinct from 'cs_test_1' then
+    raise exception 'CHECK FAILED: attach_hold_session with matching token should set session, got %', v_session;
   end if;
 
   -- First payment records the order and marks the listing sold.
@@ -57,6 +119,22 @@ begin
   if v_count <> 0 then
     raise exception 'CHECK FAILED: hold row should be deleted after payment, found %', v_count;
   end if;
+
+  -- A paid order is not touched by mark_order_refunded.
+  perform public.mark_order_refunded('cs_test_1', 're_x');
+  select status, stripe_refund_id into v_status, v_refund_id from public.orders where stripe_checkout_session_id = 'cs_test_1';
+  if v_status is distinct from 'paid' or v_refund_id is not null then
+    raise exception 'CHECK FAILED: mark_order_refunded must not change a paid order, got % / %', v_status, v_refund_id;
+  end if;
+
+  -- Only one paid order per listing is enforced by the unique index.
+  begin
+    insert into public.orders (listing_id, stripe_checkout_session_id, seller_email, seller_stripe_account_id, amount_cents, status)
+    values (v_listing_id, 'cs_dup_paid', 'seller@example.com', 'acct_test_1', 2500, 'paid');
+    raise exception 'CHECK FAILED: second paid order for a listing should violate orders_one_paid_per_listing';
+  exception when unique_violation then
+    null;
+  end;
 
   -- Replayed webhook for the same session is a duplicate.
   v_result := public.record_paid_order('cs_test_1', 'pi_test_1', v_listing_id, 'buyer@example.com', 2500, 125, 'acct_test_1');
@@ -102,15 +180,86 @@ begin
     raise exception 'CHECK FAILED: reserve_listing on sold listing should return false, got %', v_bool;
   end if;
 
-  -- Privileges: anon cannot execute functions or read orders.
-  if has_function_privilege('anon', 'public.reserve_listing(uuid,uuid,integer)', 'execute') then
-    raise exception 'CHECK FAILED: anon must not execute reserve_listing';
+  -- NULL fee records 0; seller email is stored lower-cased.
+  reset role;
+  insert into public.listings (title, price, category, seller_email)
+  values ('Stripe check listing 2', 10.00, 'Test', 'Mixed.Case@Example.com')
+  returning id into v_listing2_id;
+  set local role service_role;
+
+  v_result := public.record_paid_order('cs_test_3', 'pi_test_3', v_listing2_id, 'buyer@example.com', 1000, null, 'acct_test_2');
+  if v_result is distinct from 'recorded' then
+    raise exception 'CHECK FAILED: record_paid_order with NULL fee should return recorded, got %', v_result;
   end if;
-  if has_function_privilege('anon', 'public.record_paid_order(text,text,uuid,text,integer,integer,text)', 'execute') then
-    raise exception 'CHECK FAILED: anon must not execute record_paid_order';
+  select application_fee_cents, seller_email into v_fee, v_email from public.orders where stripe_checkout_session_id = 'cs_test_3';
+  if v_fee is distinct from 0 then
+    raise exception 'CHECK FAILED: NULL fee should record 0, got %', v_fee;
   end if;
-  if has_table_privilege('anon', 'public.orders', 'select') then
-    raise exception 'CHECK FAILED: anon must not select from orders';
+  if v_email is distinct from 'mixed.case@example.com' then
+    raise exception 'CHECK FAILED: order seller_email should be lower-cased, got %', v_email;
+  end if;
+
+  -- updated_at trigger still fires (it overrides an explicit value).
+  update public.listings set updated_at = '2000-01-01' where id = v_listing_id;
+  select updated_at into v_ts from public.listings where id = v_listing_id;
+  if v_ts < now() - interval '1 minute' then
+    raise exception 'CHECK FAILED: updated_at trigger did not fire, got %', v_ts;
+  end if;
+
+  reset role;
+
+  -- Privileges and RLS.
+  foreach v_role in array array['anon', 'authenticated'] loop
+    foreach v_sig in array array[
+      'public.reserve_listing(uuid,uuid,integer)',
+      'public.attach_hold_session(uuid,uuid,text,text)',
+      'public.release_listing_hold(uuid,uuid)',
+      'public.record_paid_order(text,text,uuid,text,integer,integer,text)',
+      'public.mark_order_refunded(text,text)',
+      'public.update_updated_at_column()'
+    ] loop
+      if has_function_privilege(v_role, v_sig, 'execute') then
+        raise exception 'CHECK FAILED: % must not execute %', v_role, v_sig;
+      end if;
+    end loop;
+
+    foreach v_tbl in array array['public.seller_accounts', 'public.listing_holds', 'public.orders'] loop
+      foreach v_priv in array array['select', 'insert', 'update', 'delete'] loop
+        if has_table_privilege(v_role, v_tbl, v_priv) then
+          raise exception 'CHECK FAILED: % must not % on %', v_role, v_priv, v_tbl;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+
+  foreach v_sig in array array[
+    'public.reserve_listing(uuid,uuid,integer)',
+    'public.attach_hold_session(uuid,uuid,text,text)',
+    'public.release_listing_hold(uuid,uuid)',
+    'public.record_paid_order(text,text,uuid,text,integer,integer,text)',
+    'public.mark_order_refunded(text,text)'
+  ] loop
+    if not has_function_privilege('service_role', v_sig, 'execute') then
+      raise exception 'CHECK FAILED: service_role must execute %', v_sig;
+    end if;
+  end loop;
+
+  foreach v_tbl in array array['public.seller_accounts', 'public.listing_holds', 'public.orders'] loop
+    foreach v_priv in array array['select', 'insert', 'update', 'delete'] loop
+      if not has_table_privilege('service_role', v_tbl, v_priv) then
+        raise exception 'CHECK FAILED: service_role must % on %', v_priv, v_tbl;
+      end if;
+    end loop;
+
+    if not (select relrowsecurity from pg_class where oid = v_tbl::regclass) then
+      raise exception 'CHECK FAILED: row level security must be enabled on %', v_tbl;
+    end if;
+  end loop;
+
+  select count(*) into v_count from pg_policies
+   where schemaname = 'public' and tablename in ('seller_accounts', 'listing_holds', 'orders');
+  if v_count <> 0 then
+    raise exception 'CHECK FAILED: new tables must have no RLS policies, found %', v_count;
   end if;
 
   raise notice 'ALL CHECKS PASSED';
@@ -118,3 +267,5 @@ end;
 $$;
 
 rollback;
+
+select 'ALL CHECKS PASSED' as result;
