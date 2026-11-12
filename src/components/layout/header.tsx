@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, UserRound } from "lucide-react";
+import { Bell, UserRound, Wallet } from "lucide-react";
 
 import { FacebookLogo } from "@/components/layout/facebook-logo";
 import { HeaderMessagesLink } from "@/components/layout/header-messages-link";
@@ -28,6 +28,14 @@ export function Header() {
           >
             <Bell className="h-5 w-5" />
           </span>
+          <Link
+            href="/seller/payments"
+            aria-label="Get paid"
+            title="Get paid"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 sm:h-10 sm:w-10"
+          >
+            <Wallet className="h-5 w-5" />
+          </Link>
           <Link
             href="/your-listings"
             aria-label="Your listings"

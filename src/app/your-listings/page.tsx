@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Sidebar } from "@/components/layout/sidebar";
@@ -60,6 +61,15 @@ export default function YourListingsPage() {
           <p className="text-sm text-gray-600">
             Your listings are tied to the email you use when posting. This
             is browser-local, not an account.
+          </p>
+          <p className="mt-1 text-sm text-gray-600">
+            Want buyers to pay online?{" "}
+            <Link
+              href="/seller/payments"
+              className="font-medium text-[#1877F2] hover:underline"
+            >
+              Set up payouts
+            </Link>
           </p>
 
           <form
