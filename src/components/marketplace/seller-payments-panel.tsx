@@ -13,10 +13,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isTrustedStripeUrl } from "@/lib/stripe/redirect";
 import type { SellerPaymentStatus } from "@/lib/types";
 import { isValidEmail } from "@/lib/validation";
 
 const STORAGE_KEY = "marketplace_seller_email";
+const FALLBACK_ERROR = "Something went wrong. Try again.";
+const ERROR_ID = "payments-seller-email-error";
 
 type ApiResponse = {
   url?: string;
@@ -63,6 +66,7 @@ export function SellerPaymentsPanel() {
       setPending(true);
       setError(null);
 
+      let redirecting = false;
       try {
         const response = await fetch(url, init);
         const data = (await response
@@ -70,11 +74,16 @@ export function SellerPaymentsPanel() {
           .catch(() => null)) as ApiResponse | null;
 
         if (!response.ok || !data || data.error) {
-          setError(data?.error ?? "Something went wrong. Try again.");
+          setError(data?.error ?? FALLBACK_ERROR);
           return;
         }
 
-        if (data.url) {
+        if (data.url !== undefined) {
+          if (!isTrustedStripeUrl(data.url)) {
+            setError(FALLBACK_ERROR);
+            return;
+          }
+          redirecting = true;
           window.location.assign(data.url);
           return;
         }
@@ -83,10 +92,12 @@ export function SellerPaymentsPanel() {
           setStatus(data.status ?? null);
         }
       } catch {
-        setError("Something went wrong. Try again.");
+        setError(FALLBACK_ERROR);
       } finally {
-        pendingRef.current = false;
-        setPending(false);
+        if (!redirecting) {
+          pendingRef.current = false;
+          setPending(false);
+        }
       }
     },
     [],
@@ -126,7 +137,12 @@ export function SellerPaymentsPanel() {
     }
     if (stored) setEmail(stored);
 
-    if (!stored || !isValidEmail(stored.toLowerCase())) return;
+    if (!stored || !isValidEmail(stored.toLowerCase())) {
+      if (onboarding === "return" || onboarding === "refresh") {
+        setError("Enter your seller email to continue.");
+      }
+      return;
+    }
 
     if (onboarding === "return") {
       setWelcome(true);
@@ -190,9 +206,17 @@ export function SellerPaymentsPanel() {
             id="payments-seller-email"
             type="email"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              setStatus(undefined);
+              setWelcome(false);
+            }}
             placeholder="you@example.com"
-            aria-describedby="payments-seller-email-help"
+            aria-describedby={
+              error
+                ? `payments-seller-email-help ${ERROR_ID}`
+                : "payments-seller-email-help"
+            }
             aria-invalid={Boolean(error) && !isValidEmail(email.trim().toLowerCase())}
           />
         </div>
@@ -205,7 +229,7 @@ export function SellerPaymentsPanel() {
       </p>
 
       {error ? (
-        <p role="alert" className="text-sm text-red-600">
+        <p id={ERROR_ID} role="alert" className="text-sm text-red-600">
           {error}
         </p>
       ) : null}
@@ -217,7 +241,10 @@ export function SellerPaymentsPanel() {
       ) : null}
 
       {status ? (
-        <ul className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <ul
+          aria-label="Payment status"
+          className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-4"
+        >
           <StatusRow label="Details submitted" value={status.details_submitted} />
           <StatusRow label="Can receive payments" value={status.charges_enabled} />
           <StatusRow label="Payouts enabled" value={status.payouts_enabled} />

@@ -5,6 +5,7 @@ import { useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { PURCHASE_REASON_TEXT } from "@/lib/purchase";
+import { isTrustedStripeUrl } from "@/lib/stripe/redirect";
 import type { PurchaseState } from "@/lib/types";
 
 type BuyNowButtonProps = {
@@ -68,21 +69,34 @@ export function BuyNowButton({ listingId, purchase }: BuyNowButtonProps) {
         error?: string;
       } | null;
 
-      if (!response.ok || !data?.url) {
+      if (!response.ok) {
+        try {
+          window.sessionStorage.removeItem(key);
+        } catch {
+          // Storage unavailable; nothing to clear.
+        }
         setError(data?.error ?? FALLBACK_ERROR);
         inFlight.current = false;
         setPending(false);
         return;
       }
 
-      if (data.holdToken) {
+      const url = data?.url;
+      if (!isTrustedStripeUrl(url)) {
+        setError(data?.error ?? FALLBACK_ERROR);
+        inFlight.current = false;
+        setPending(false);
+        return;
+      }
+
+      if (data?.holdToken) {
         try {
           window.sessionStorage.setItem(key, data.holdToken);
         } catch {
           // Storage unavailable; checkout still works without a saved hold.
         }
       }
-      window.location.assign(data.url);
+      window.location.assign(url);
     } catch {
       setError(FALLBACK_ERROR);
       inFlight.current = false;

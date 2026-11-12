@@ -4,7 +4,7 @@ import { getPurchaseState } from "@/lib/purchase";
 import { readStripeEnv } from "@/lib/stripe/config";
 import { supabase } from "@/lib/supabase";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import type { Listing } from "@/lib/types";
+import type { Listing, PurchaseState } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
 
 type ListingRow = Omit<Listing, "price"> & { price: number | string };
@@ -28,7 +28,7 @@ function stripeConfigured(): boolean {
   }
 }
 
-async function loadPurchaseGate(listing: Listing) {
+async function loadPurchaseGate(listing: Listing, holdToken: string | null) {
   const admin = getSupabaseAdmin();
   if (!admin || !stripeConfigured()) {
     return UNAVAILABLE;
@@ -42,7 +42,7 @@ async function loadPurchaseGate(listing: Listing) {
       .maybeSingle(),
     admin
       .from("listing_holds")
-      .select("listing_id")
+      .select("hold_token")
       .eq("listing_id", listing.id)
       .gt("expires_at", new Date().toISOString())
       .maybeSingle(),
@@ -58,13 +58,19 @@ async function loadPurchaseGate(listing: Listing) {
     seller: sellerResult.data
       ? { charges_enabled: Boolean(sellerResult.data.charges_enabled) }
       : null,
-    hasActiveHold: Boolean(holdResult.data),
+    hasActiveHold: Boolean(holdResult.data) &&
+      !(holdToken !== null && holdResult.data?.hold_token === holdToken),
     paymentsConfigured: true,
   };
 }
 
-export async function GET(_request: Request, { params }: RouteContext) {
+export async function GET(request: Request, { params }: RouteContext) {
   const { id } = await params;
+  const rawHoldToken = new URL(request.url).searchParams.get("holdToken");
+  const holdToken =
+    rawHoldToken !== null && isUuid(rawHoldToken)
+      ? rawHoldToken.toLowerCase()
+      : null;
 
   if (!isUuid(id)) {
     return NextResponse.json(
@@ -99,13 +105,20 @@ export async function GET(_request: Request, { params }: RouteContext) {
       price: Number((data as ListingRow).price),
     } as Listing;
 
-    const gate = await loadPurchaseGate(listing);
-    const purchase = getPurchaseState(
-      listing,
-      gate.seller,
-      gate.hasActiveHold,
-      gate.paymentsConfigured,
-    );
+    let purchase: PurchaseState;
+    try {
+      const gate = await loadPurchaseGate(listing, holdToken);
+      purchase = getPurchaseState(
+        listing,
+        gate.seller,
+        gate.hasActiveHold,
+        gate.paymentsConfigured,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Purchase state failed:", message);
+      purchase = { buyable: false, reason: "payments_unavailable" };
+    }
 
     return NextResponse.json({ listing, purchase });
   } catch {

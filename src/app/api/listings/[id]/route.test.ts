@@ -22,6 +22,8 @@ vi.mock("@/lib/supabase", () => ({
 vi.mock("@/lib/supabase-admin", () => ({ getSupabaseAdmin: vi.fn() }));
 
 const ID = "11111111-1111-4111-8111-111111111111";
+const HOLD_TOKEN = "22222222-2222-4222-8222-222222222222";
+const OTHER_TOKEN = "33333333-3333-4333-8333-333333333333";
 
 function makeListing(overrides: Record<string, unknown> = {}) {
   return {
@@ -72,7 +74,7 @@ function fakeAdmin(opts: {
             eq: () => ({
               gt: () => ({
                 maybeSingle: async () => ({
-                  data: opts.hold ? { listing_id: ID } : null,
+                  data: opts.hold ? { hold_token: HOLD_TOKEN } : null,
                   error: null,
                 }),
               }),
@@ -91,8 +93,8 @@ function useAdmin(admin: ReturnType<typeof fakeAdmin>) {
   );
 }
 
-async function call() {
-  const res = await GET(new Request("http://localhost/api/listings/x"), {
+async function call(query = "") {
+  const res = await GET(new Request(`http://localhost/api/listings/x${query}`), {
     params: Promise.resolve({ id: ID }),
   });
   const text = await res.text();
@@ -140,5 +142,43 @@ describe("GET /api/listings/[id] purchase state", () => {
     const { body, text } = await call();
     expect(body.purchase).toEqual({ buyable: false, reason: "reserved" });
     expect(text).not.toContain("stripe_account_id");
+  });
+
+  it("is buyable when the holdToken matches the active hold", async () => {
+    useAdmin(fakeAdmin({ seller: { charges_enabled: true }, hold: true }));
+    const { status, body, text } = await call(`?holdToken=${HOLD_TOKEN}`);
+    expect(status).toBe(200);
+    expect(body.purchase).toEqual({ buyable: true, amountCents: 2500 });
+    expect(text).not.toContain(HOLD_TOKEN);
+    expect(text).not.toContain("hold_token");
+  });
+
+  it("stays reserved when the holdToken does not match", async () => {
+    useAdmin(fakeAdmin({ seller: { charges_enabled: true }, hold: true }));
+    const { body, text } = await call(`?holdToken=${OTHER_TOKEN}`);
+    expect(body.purchase).toEqual({ buyable: false, reason: "reserved" });
+    expect(text).not.toContain(HOLD_TOKEN);
+  });
+
+  it("ignores a malformed holdToken", async () => {
+    useAdmin(fakeAdmin({ seller: { charges_enabled: true }, hold: true }));
+    const { body } = await call("?holdToken=not-a-uuid");
+    expect(body.purchase).toEqual({ buyable: false, reason: "reserved" });
+  });
+
+  it("still returns the listing when purchase state throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(getSupabaseAdmin).mockImplementation(() => {
+      throw new Error("boom");
+    });
+    const { status, body } = await call();
+    expect(status).toBe(200);
+    expect(body.listing.id).toBe(ID);
+    expect(body.purchase).toEqual({
+      buyable: false,
+      reason: "payments_unavailable",
+    });
+    expect(errorSpy).toHaveBeenCalledWith("Purchase state failed:", "boom");
+    errorSpy.mockRestore();
   });
 });

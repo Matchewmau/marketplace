@@ -39,8 +39,18 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
     setState({ status: "loading" });
 
     async function load() {
+      let holdToken: string | null = null;
       try {
-        const response = await fetch(`/api/listings/${listingId}`, {
+        holdToken = window.sessionStorage.getItem(`hold:${listingId}`);
+      } catch {
+        holdToken = null;
+      }
+      const query = holdToken
+        ? `?holdToken=${encodeURIComponent(holdToken)}`
+        : "";
+
+      try {
+        const response = await fetch(`/api/listings/${listingId}${query}`, {
           signal: controller.signal,
         });
 
