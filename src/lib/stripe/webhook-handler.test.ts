@@ -12,12 +12,12 @@ const HOLD_TOKEN = "22222222-2222-4222-8222-222222222222";
 
 type RpcCall = { name: string; args: Record<string, unknown> };
 
-function fakeAdmin() {
+function fakeAdmin(rpcError: string | null = null) {
   const rpcCalls: RpcCall[] = [];
   const admin = {
     async rpc(name: string, args: Record<string, unknown>) {
       rpcCalls.push({ name, args });
-      return { data: null, error: null };
+      return { data: null, error: rpcError ? { message: rpcError } : null };
     },
   };
   return { admin: admin as unknown as SupabaseClient, rpcCalls };
@@ -87,5 +87,58 @@ describe("handleStripeEvent", () => {
     expect(outcome).toBe("ignored");
     expect(rpcCalls).toEqual([]);
     expect(fulfillCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("returns ignored when fulfilment ignores a session without app metadata", async () => {
+    vi.mocked(fulfillCheckoutSession).mockResolvedValue({
+      outcome: "ignored",
+      listingId: null,
+      amountCents: 500,
+    });
+    const { admin } = fakeAdmin();
+    const outcome = await handleStripeEvent(
+      event("checkout.session.completed", { id: "cs_test_other" }),
+      { stripe, admin },
+    );
+    expect(outcome).toBe("ignored");
+  });
+
+  it("propagates fulfilment errors so the webhook is retried", async () => {
+    vi.mocked(fulfillCheckoutSession).mockRejectedValue(new Error("db down"));
+    const { admin } = fakeAdmin();
+    await expect(
+      handleStripeEvent(event("checkout.session.completed", { id: "cs_test_1" }), {
+        stripe,
+        admin,
+      }),
+    ).rejects.toThrow("db down");
+  });
+
+  it.each([
+    ["no metadata", undefined],
+    ["a non-uuid listing_id", { listing_id: "abc", hold_token: HOLD_TOKEN }],
+    ["a non-uuid hold_token", { listing_id: LISTING_ID, hold_token: "h" }],
+    ["a missing hold_token", { listing_id: LISTING_ID }],
+  ])("ignores an expired session with %s", async (_label, metadata) => {
+    const { admin, rpcCalls } = fakeAdmin();
+    const outcome = await handleStripeEvent(
+      event("checkout.session.expired", { id: "cs_test_4", metadata }),
+      { stripe, admin },
+    );
+    expect(outcome).toBe("ignored");
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("throws when releasing the expired session's hold fails", async () => {
+    const { admin } = fakeAdmin("db down");
+    await expect(
+      handleStripeEvent(
+        event("checkout.session.expired", {
+          id: "cs_test_5",
+          metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN },
+        }),
+        { stripe, admin },
+      ),
+    ).rejects.toThrow("Failed to release hold: db down");
   });
 });

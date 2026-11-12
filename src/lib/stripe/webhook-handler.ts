@@ -12,9 +12,10 @@ export async function handleStripeEvent(
 ): Promise<WebhookOutcome> {
   switch (event.type) {
     case "checkout.session.completed":
-    case "checkout.session.async_payment_succeeded":
-      await fulfillCheckoutSession(event.data.object.id, deps);
-      return "fulfilled";
+    case "checkout.session.async_payment_succeeded": {
+      const { outcome } = await fulfillCheckoutSession(event.data.object.id, deps);
+      return outcome === "ignored" ? "ignored" : "fulfilled";
+    }
     case "checkout.session.expired": {
       const listingId = event.data.object.metadata?.listing_id;
       const holdToken = event.data.object.metadata?.hold_token;

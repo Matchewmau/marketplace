@@ -1,14 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
 import { getPurchaseState, PURCHASE_REASON_TEXT } from "@/lib/purchase";
 import { applicationFeeCents, safeProductImage } from "@/lib/stripe/amount";
-import { refreshSellerAccount, safeErrorMessage } from "@/lib/stripe/connect";
+import {
+  refreshSellerAccount,
+  safeErrorMessage,
+  SellerAccountMissingError,
+} from "@/lib/stripe/connect";
 import type { Listing, PurchaseBlockReason } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
 
-export const CHECKOUT_SESSION_TTL_SECONDS = 1860; // Stripe requires >= 30 min after creation
+// Stripe requires >= 30 min after creation; the margin absorbs clock skew and retries.
+export const CHECKOUT_SESSION_TTL_SECONDS = 1980;
+// Must stay above the session TTL so a payable session never outlives its hold.
 export const HOLD_TTL_SECONDS = 2400;
 
 export type CheckoutDeps = {
@@ -30,7 +36,10 @@ export type CheckoutResult =
 type ListingRow = Pick<Listing, "id" | "title" | "price" | "image_url" | "seller_email" | "status">;
 type HoldRow = { checkout_session_id: string | null };
 
+export type CancelResult = "cancelled" | "already_paid" | "unknown";
+
 const LOG_PREFIX = "checkout failed:";
+const CANCEL_LOG_PREFIX = "checkout cancel failed:";
 const START_ERROR = "Could not start checkout. Try again.";
 const SERVER_ERROR = "Could not start checkout.";
 
@@ -123,6 +132,15 @@ export async function createCheckoutForListing(
         }
         return blocked("sold");
       }
+      if (session.status === "open") {
+        // An open session without a url cannot be resumed; expire it and start over.
+        try {
+          await stripe.checkout.sessions.expire(session.id);
+        } catch (err) {
+          console.error(LOG_PREFIX, "expire session", safeErrorMessage(err));
+        }
+        await releaseHold(admin, listing.id, holdToken);
+      }
       if (session.status === "expired") {
         await releaseHold(admin, listing.id, holdToken);
       }
@@ -132,11 +150,19 @@ export async function createCheckoutForListing(
     }
   }
 
-  const seller = await refreshSellerAccount(
-    stripe,
-    admin,
-    listing.seller_email.trim().toLowerCase(),
-  );
+  let seller: Awaited<ReturnType<typeof refreshSellerAccount>>;
+  try {
+    seller = await refreshSellerAccount(stripe, admin, listing.seller_email.trim().toLowerCase());
+  } catch (err) {
+    if (err instanceof SellerAccountMissingError) {
+      return blocked("seller_not_onboarded");
+    }
+    console.error(LOG_PREFIX, "refresh seller account", safeErrorMessage(err));
+    if (err instanceof Stripe.errors.StripeError) {
+      return { ok: false, status: 502, error: START_ERROR };
+    }
+    return { ok: false, status: 500, error: SERVER_ERROR };
+  }
   if (!seller || !seller.charges_enabled) {
     return blocked("seller_not_onboarded");
   }
@@ -188,7 +214,11 @@ export async function createCheckoutForListing(
         payment_intent_data: {
           transfer_data: { destination: seller.stripe_account_id },
           ...(fee > 0 ? { application_fee_amount: fee } : {}),
-          metadata: { listing_id: listing.id, hold_token: hold },
+          metadata: {
+            listing_id: listing.id,
+            hold_token: hold,
+            seller_account_id: seller.stripe_account_id,
+          },
         },
         metadata: {
           listing_id: listing.id,
@@ -221,29 +251,59 @@ export async function createCheckoutForListing(
   });
   if (attachError) {
     console.error(LOG_PREFIX, "attach_hold_session", safeErrorMessage(attachError.message));
+    // Without the session on the hold it cannot be resumed or cancelled; do not hand it out.
+    try {
+      await stripe.checkout.sessions.expire(session.id);
+    } catch (err) {
+      console.error(LOG_PREFIX, "expire session", safeErrorMessage(err));
+    }
+    await releaseHold(admin, listing.id, hold);
+    return { ok: false, status: 502, error: START_ERROR };
   }
 
   return { ok: true, url: session.url, holdToken: hold };
 }
 
-/** Expires the buyer's Checkout Session (if any) and releases their hold. Never throws. */
+/**
+ * Expires the buyer's Checkout Session (if any) and releases their hold. The hold is only released
+ * once the session can no longer be paid; otherwise its TTL clears it. Never throws.
+ */
 export async function cancelCheckoutHold(
   listingId: string,
   holdToken: string,
   deps: { stripe: Stripe; admin: SupabaseClient },
-): Promise<void> {
+): Promise<CancelResult> {
   const { stripe, admin } = deps;
   try {
     const hold = await loadHold(admin, listingId, holdToken);
-    if (hold?.checkout_session_id) {
+    if (!hold) {
+      // Already released, expired, or consumed by a paid order: we cannot tell which.
+      return "unknown";
+    }
+    if (!hold.checkout_session_id) {
+      await releaseHold(admin, listingId, holdToken);
+      return "cancelled";
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(hold.checkout_session_id);
+    if (session.status === "complete") {
       try {
-        await stripe.checkout.sessions.expire(hold.checkout_session_id);
-      } catch {
-        // The session may already be complete or expired.
+        await fulfillCheckoutSession(session.id, { stripe, admin });
+      } catch (err) {
+        console.error(CANCEL_LOG_PREFIX, safeErrorMessage(err));
       }
+      return "already_paid";
+    }
+    if (session.status === "open") {
+      // Throws if the session could not be expired; the hold then stays until its TTL.
+      await stripe.checkout.sessions.expire(session.id);
+    } else if (session.status !== "expired") {
+      return "unknown";
     }
     await releaseHold(admin, listingId, holdToken);
+    return "cancelled";
   } catch (err) {
-    console.error("checkout cancel failed:", safeErrorMessage(err));
+    console.error(CANCEL_LOG_PREFIX, safeErrorMessage(err));
+    return "unknown";
   }
 }

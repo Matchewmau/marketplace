@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 
 import { ClearHoldToken } from "@/components/marketplace/clear-hold-token";
 import { fulfillCheckoutSession, type FulfillResult } from "@/lib/fulfillment";
@@ -92,6 +92,13 @@ export default async function CheckoutSuccessPage({ searchParams }: SuccessPageP
   try {
     result = await fulfillCheckoutSession(sessionId, { stripe, admin });
   } catch (err) {
+    if (err instanceof Stripe.errors.StripeError && err.code === "resource_missing") {
+      return (
+        <Panel title="Checkout not found">
+          <Message>We couldn&apos;t find that checkout.</Message>
+        </Panel>
+      );
+    }
     console.error("checkout success failed:", safeErrorMessage(err));
     return (
       <Panel title="Confirming your payment">
@@ -101,6 +108,14 @@ export default async function CheckoutSuccessPage({ searchParams }: SuccessPageP
   }
 
   const { outcome, listingId, amountCents } = result;
+
+  if (outcome === "ignored") {
+    return (
+      <Panel title="Checkout not found">
+        <Message>We couldn&apos;t find that checkout.</Message>
+      </Panel>
+    );
+  }
 
   if (outcome === "refunded") {
     return (

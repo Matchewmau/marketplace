@@ -165,8 +165,8 @@ begin
   end if;
 
   v_result := public.record_paid_order('cs_test_2', 'pi_test_2', v_listing_id, 'late@example.com', 2500, 125, 'acct_test_1');
-  if v_result is distinct from 'duplicate' then
-    raise exception 'CHECK FAILED: record_paid_order after refund should return duplicate, got %', v_result;
+  if v_result is distinct from 'refunded' then
+    raise exception 'CHECK FAILED: record_paid_order after refund should return refunded, got %', v_result;
   end if;
 
   select count(*) into v_count from public.orders where listing_id = v_listing_id and status = 'paid';

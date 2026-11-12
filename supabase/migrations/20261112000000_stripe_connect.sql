@@ -191,6 +191,9 @@ begin
     if v_existing_status = 'refund_pending' then
       return 'refund_pending';
     end if;
+    if v_existing_status = 'refunded' then
+      return 'refunded';
+    end if;
     return 'duplicate';
   end if;
 

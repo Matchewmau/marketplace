@@ -1,18 +1,59 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 
 import { isUuid } from "@/lib/validation";
 
-export type FulfillOutcome = "recorded" | "duplicate" | "refunded" | "not_paid";
+export type FulfillOutcome = "recorded" | "duplicate" | "refunded" | "not_paid" | "ignored";
 export type FulfillResult = {
   outcome: FulfillOutcome;
   listingId: string | null;
   amountCents: number | null;
 };
 
+const LOG_PREFIX = "fulfillment:";
+
+/**
+ * Refunds the PaymentIntent (reversing the transfer, and the platform fee if any) and returns the
+ * refund id. A refund already made by hand in the Dashboard is reused. Throws unless the refund
+ * is in a non-failed state, so the caller retries.
+ */
+async function refundPayment(
+  stripe: Stripe,
+  sessionId: string,
+  paymentIntentId: string,
+  fee: number,
+): Promise<string> {
+  let refund: Stripe.Refund | undefined;
+  try {
+    refund = await stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        reverse_transfer: true,
+        ...(fee > 0 ? { refund_application_fee: true } : {}),
+      },
+      { idempotencyKey: `refund:${sessionId}` },
+    );
+  } catch (err) {
+    if (!(err instanceof Stripe.errors.StripeError && err.code === "charge_already_refunded")) {
+      throw err;
+    }
+    const existing = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 1 });
+    refund = existing.data[0];
+    if (!refund) {
+      throw new Error("Charge is already refunded but no refund was found.");
+    }
+  }
+
+  if (refund.status === "failed" || refund.status === "canceled") {
+    throw new Error(`Refund ${refund.id} is ${refund.status}.`);
+  }
+  return refund.id;
+}
+
 /**
  * Records a paid Checkout Session as an order. Idempotent: a repeat call returns "duplicate",
  * and a session that lost the race for the listing is refunded (retried until marked refunded).
+ * Paid sessions without this app's metadata are ignored.
  */
 export async function fulfillCheckoutSession(
   sessionId: string,
@@ -25,13 +66,18 @@ export async function fulfillCheckoutSession(
 
   const metadataListingId = session.metadata?.listing_id ?? null;
   const listingId = metadataListingId && isUuid(metadataListingId) ? metadataListingId : null;
+  const holdToken = session.metadata?.hold_token ?? null;
 
   if (session.payment_status !== "paid") {
     return { outcome: "not_paid", listingId, amountCents: session.amount_total };
   }
 
-  if (!listingId) {
-    throw new Error("Checkout session has no valid listing_id metadata.");
+  if (!listingId || !holdToken || !isUuid(holdToken)) {
+    // Another Checkout integration on the same account (e.g. Payment Links); not ours.
+    console.warn(LOG_PREFIX, "ignoring paid session without listing metadata", {
+      sessionId: session.id,
+    });
+    return { outcome: "ignored", listingId: null, amountCents: session.amount_total };
   }
 
   const pi = session.payment_intent;
@@ -52,6 +98,24 @@ export async function fulfillCheckoutSession(
     throw new Error("Checkout session has no seller account.");
   }
 
+  const { data: listingRow, error: listingError } = await admin
+    .from("listings")
+    .select("id")
+    .eq("id", listingId)
+    .maybeSingle();
+  if (listingError) {
+    throw new Error(`Failed to load listing: ${listingError.message}`);
+  }
+  if (!listingRow) {
+    // The listing was deleted after the session was created; there is nothing to sell.
+    const refundId = await refundPayment(stripe, session.id, pi.id, fee);
+    console.warn(LOG_PREFIX, "refunded session for a deleted listing", {
+      sessionId: session.id,
+      refundId,
+    });
+    return { outcome: "refunded", listingId, amountCents };
+  }
+
   const { data, error } = await admin.rpc("record_paid_order", {
     p_session_id: session.id,
     p_payment_intent_id: pi.id,
@@ -65,23 +129,16 @@ export async function fulfillCheckoutSession(
     throw new Error(`Failed to record order: ${error.message}`);
   }
 
-  if (data === "recorded" || data === "duplicate") {
+  if (data === "recorded" || data === "duplicate" || data === "refunded") {
     return { outcome: data, listingId, amountCents };
   }
 
   if (data === "refund_pending") {
-    const refund = await stripe.refunds.create(
-      {
-        payment_intent: pi.id,
-        reverse_transfer: true,
-        ...(fee > 0 ? { refund_application_fee: true } : {}),
-      },
-      { idempotencyKey: `refund:${session.id}` },
-    );
+    const refundId = await refundPayment(stripe, session.id, pi.id, fee);
 
     const { error: refundError } = await admin.rpc("mark_order_refunded", {
       p_session_id: session.id,
-      p_refund_id: refund.id,
+      p_refund_id: refundId,
     });
     if (refundError) {
       throw new Error(`Failed to mark order refunded: ${refundError.message}`);

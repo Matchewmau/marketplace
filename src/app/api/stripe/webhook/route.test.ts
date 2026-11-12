@@ -75,4 +75,25 @@ describe("POST /api/stripe/webhook", () => {
     expect(res.status).toBe(503);
     expect(fulfillCheckoutSession).not.toHaveBeenCalled();
   });
+
+  it("returns 500 when handling fails so Stripe retries delivery", async () => {
+    vi.mocked(fulfillCheckoutSession).mockRejectedValue(new Error("db down sk_test_secret123"));
+    const signature = signer.webhooks.generateTestHeaderString({ payload, secret: SECRET });
+    const res = await POST(post(payload, signature));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Webhook handling failed." });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("sk_test_secret123");
+  });
+
+  it("returns 200 for a paid session that fulfilment ignores", async () => {
+    vi.mocked(fulfillCheckoutSession).mockResolvedValue({
+      outcome: "ignored",
+      listingId: null,
+      amountCents: 500,
+    });
+    const signature = signer.webhooks.generateTestHeaderString({ payload, secret: SECRET });
+    const res = await POST(post(payload, signature));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: true });
+  });
 });
