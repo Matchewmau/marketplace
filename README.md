@@ -1,10 +1,13 @@
 # Marketplace
 
 A Facebook Marketplace–inspired buying and selling app built for the Notion
-“Test 3: Marketplace” challenge. Visitors can create a listing with a photo,
+“Test 3: Marketplace” challenge, and it now also covers “Test 4: Stripe Connect”
+(sellers get paid through Stripe, buyers pay with Stripe-hosted Checkout). Visitors can create a listing with a photo,
 browse and search listings, filter by category, price, condition, location, and
 sort order, open a listing, and send a message to the seller. Sellers read those
-messages in an email-keyed inbox.
+messages in an email-keyed inbox. Sellers can set up payouts with Stripe
+Connect, and buyers can buy a listing with a card. The Stripe integration runs
+in a Stripe **sandbox** only.
 
 **Live demo:** [marketplace-ten-silk-78.vercel.app](https://marketplace-ten-silk-78.vercel.app)
 
@@ -27,6 +30,17 @@ messages in an email-keyed inbox.
 - Seller inbox at `/messages`, opened from the header message icon, grouped by
   listing with buyer email links and relative timestamps.
 - “Your listings” view scoped to the email saved in this browser.
+- Seller payouts with Stripe Connect: sellers onboard at `/seller/payments`
+  (“Get paid” in the header) using their seller email.
+- “Buy now” on listing pages, with a clear reason when it is disabled (seller
+  not set up, free item, below $0.50 or above the online limit, sold, or
+  reserved by another buyer).
+- Stripe-hosted Checkout using destination charges: the payment goes to the
+  seller's connected account, minus an optional platform fee.
+- Orders are recorded in Supabase; sold listings show a “Sold” badge.
+- Double-purchase protection: starting checkout places a time-limited hold on
+  the listing, and if a second payment still lands on an already-sold item it
+  is refunded automatically.
 - Loading skeletons, empty states, error retry, and a custom not-found page.
 
 ## Tech stack
@@ -38,6 +52,8 @@ messages in an email-keyed inbox.
 | Language | TypeScript 5 |
 | Database | Supabase Postgres |
 | Storage | Supabase Storage (`listing-images` bucket) |
+| Payments | Stripe (stripe-node 23.1.0, Connect Accounts v2 recipient accounts, Checkout) |
+| Testing | Vitest + PGlite |
 | Hosting | Vercel |
 
 ## Getting started
@@ -60,13 +76,32 @@ cp .env.local.example .env.local
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-publishable-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Stripe (sandbox only)
+STRIPE_SECRET_KEY=sk_test_replace_me
+STRIPE_WEBHOOK_SECRET=whsec_replace_me
+PLATFORM_FEE_BPS=0
+APP_URL=https://localhost:3000
 ```
 
 The publishable/anon key is safe for browser use. `SUPABASE_SERVICE_ROLE_KEY`
-is server-only, used exclusively by the messages inbox route, and may hold
+is server-only, used by the server routes (messages inbox, Stripe Connect,
+checkout, webhook, order fulfillment), and may hold
 either the legacy service-role key or the newer `sb_secret_...` key. Never
 prefix it with `NEXT_PUBLIC_`, never commit it, and keep `.env.local` out of
 git.
+
+Stripe variables (all server-only):
+
+| Variable | Notes |
+| --- | --- |
+| `STRIPE_SECRET_KEY` | Sandbox secret or restricted key only (`sk_test_` or `rk_test_`). The server refuses anything else, including live keys. |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret (`whsec_…`) for the webhook endpoint. Required by `/api/stripe/webhook`. |
+| `PLATFORM_FEE_BPS` | Optional platform fee in basis points, `0`–`10000`. Defaults to `0`. |
+| `APP_URL` | Origin used for Stripe redirect URLs. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, leave it unset (the request origin is used) or set it to the production URL. |
+
+The Stripe publishable key is not needed because the app uses Stripe-hosted
+Checkout.
 
 ### 3. Set up Supabase
 
@@ -74,6 +109,7 @@ In the Supabase Dashboard, open the SQL editor and run, in order:
 
 1. `supabase/migrations/20261109000000_init_marketplace.sql`
 2. `supabase/seed.sql`
+3. `supabase/migrations/20261112000000_stripe_connect.sql`
 
 The migration creates:
 
@@ -86,6 +122,24 @@ The migration creates:
 The seed inserts 12 sample listings, including one free listing. The seed is
 optional; the app works with an empty database.
 
+The Stripe Connect migration adds listing status, the `seller_accounts`,
+`listing_holds` and `orders` tables, and the SQL functions used by checkout (see
+[Database schema](#database-schema)).
+
+To check the migration, paste `supabase/tests/stripe_connect_checks.sql` into
+the SQL editor. It should return `ALL CHECKS PASSED` and leaves no data behind.
+
+### Stripe sandbox setup
+
+1. Create or open a Stripe account and switch to a **sandbox**.
+2. In the Dashboard, open Connect and complete the platform setup. Choose a
+   marketplace where the platform collects payments and is responsible for
+   losses.
+3. Make sure Accounts v2 is available for the sandbox (the app creates
+   recipient accounts through the v2 API).
+4. Copy the sandbox secret key (`sk_test_…`) from Developers → API keys into
+   `STRIPE_SECRET_KEY`.
+
 ### 4. Run the app
 
 ```bash
@@ -94,11 +148,51 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Running locally with Stripe
+
+Stripe onboarding returns to `https://localhost:3000`, so use the HTTPS dev
+server and set `APP_URL=https://localhost:3000`:
+
+```bash
+npm run dev:https
+```
+
+In another terminal, forward webhooks with the Stripe CLI:
+
+```bash
+stripe listen --forward-to https://localhost:3000/api/stripe/webhook --skip-verify
+```
+
+Copy the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET` and restart the dev
+server. If you have not run `stripe login`, pass the key instead:
+`stripe listen --api-key "$STRIPE_SECRET_KEY" --forward-to …`.
+
+The checkout success page also records the order, so a purchase completes even
+if the CLI is not running. Webhooks cover closed tabs and expired sessions.
+
+### Try the full flow
+
+1. Create a listing with your seller email (price of at least $0.50).
+2. Open the listing. “Buy now” is disabled because the seller has not set up
+   payments.
+3. Click “Get paid” in the header and enter the same email.
+4. Click “Set up payouts with Stripe” and complete Stripe's test onboarding.
+   Test values: phone `000 000 0000`, SMS code `000000`, SSN last 4 / ID
+   `0000` or `000-00-0000`, address line `address_full_match`, routing number
+   `110000000`, account number `000123456789`.
+5. Back on Get paid, the status flags show “Yes”.
+6. Open the listing in another browser and click “Buy now”.
+7. Pay with `4242 4242 4242 4242`, any future expiry, and any CVC.
+8. You land on “Order confirmed”. There is now an `orders` row in Supabase, the
+   listing shows “Sold”, and the transfer is visible in the Stripe Dashboard.
+
 ### Useful commands
 
 ```bash
 npm run lint      # ESLint
 npx tsc --noEmit  # TypeScript check
+npm test          # Vitest, once
+npm run check     # tsc + eslint + vitest
 npm run build     # Production build
 npm run start     # Serve the production build
 ```
@@ -120,6 +214,8 @@ npm run start     # Serve the production build
 | `location` | `varchar(255)` | Defaults to `Palo Alto, CA` |
 | `created_at` | `timestamptz` | Defaults to `now()` |
 | `updated_at` | `timestamptz` | Defaults to `now()`; maintained by trigger |
+| `status` | `text` | `active` (default) or `sold` |
+| `sold_at` | `timestamptz` | Set when sold; non-null exactly when `status = 'sold'` |
 
 ### `public.messages`
 
@@ -135,7 +231,43 @@ npm run start     # Serve the production build
 Messages are insert-only through the API. There is intentionally no public
 select policy, so the public anon key cannot read messages directly. The seller
 inbox reads them server-side through `/api/messages` using the service-role
-key.
+key (the Stripe Connect migration grants `select` on `messages` to
+`service_role` explicitly).
+
+### Stripe tables
+
+`seller_accounts`, `listing_holds` and `orders` have row-level security enabled
+with no policies, and access is revoked from `anon` and `authenticated`. Only
+the service-role key can read or write them.
+
+**`public.seller_accounts`**: `seller_email` (primary key, lowercase),
+`stripe_account_id` (unique), `charges_enabled`, `payouts_enabled`,
+`details_submitted`, `created_at`, `updated_at`.
+
+**`public.listing_holds`**: one row per listing, `listing_id` (primary key,
+cascade delete), `hold_token`, `checkout_session_id`, `checkout_url`,
+`expires_at`, `created_at`.
+
+**`public.orders`**: `id`, `listing_id`, `stripe_checkout_session_id` (unique),
+`stripe_payment_intent_id`, `stripe_refund_id`, `seller_email`,
+`seller_stripe_account_id`, `buyer_email`, `amount_cents` (`>= 50`),
+`application_fee_cents`, `currency` (default `usd`), `status` (`paid`,
+`refund_pending`, `refunded`), `created_at`, `updated_at`. A partial unique
+index allows only one `paid` order per listing.
+
+### SQL functions
+
+All are executable by `service_role` only.
+
+- `reserve_listing(listing_id, hold_token, ttl_seconds)`: places a hold on an
+  active listing unless an unexpired hold exists.
+- `attach_hold_session(listing_id, hold_token, session_id, url)`: stores the
+  Checkout Session on the hold.
+- `release_listing_hold(listing_id, hold_token)`: removes the hold.
+- `record_paid_order(...)`: records a paid session as an order and marks the
+  listing sold; idempotent, and returns `refund_pending` if the listing was
+  already sold.
+- `mark_order_refunded(session_id, refund_id)`: marks a pending refund done.
 
 ## API
 
@@ -143,10 +275,14 @@ key.
 | --- | --- | --- |
 | `GET` | `/api/listings` | Search and filter listings. Query params: `search`, `category`, `condition`, `location`, `minPrice`, `maxPrice`, `sort` (`newest`, `price_asc`, `price_desc`), `sellerEmail`. Returns `{ listings }` (limit 100). |
 | `POST` | `/api/listings` | Create a listing. Body: `title`, `description`, `price`, `category`, `condition`, `seller_email`, `image_url`, `location`. Returns `201 { listing }`. |
-| `GET` | `/api/listings/[id]` | Fetch one listing. Returns `{ listing }`, or `404` for an invalid or missing id. |
+| `GET` | `/api/listings/[id]` | Fetch one listing. Optional query param `holdToken` (a UUID from a previous checkout) so the buyer's own hold does not count as “reserved”. Returns `{ listing, purchase }`, or `404` for an invalid or missing id. `purchase` is `{ buyable: true, amountCents }` or `{ buyable: false, reason }` where `reason` is `free`, `below_minimum`, `above_maximum`, `sold`, `reserved`, `seller_not_onboarded`, or `payments_unavailable`. |
 | `POST` | `/api/upload` | Multipart form-data with `file` (JPEG, PNG, or WebP, max 4 MB). Returns `201 { url }`. |
 | `GET` | `/api/messages` | Seller inbox. Query param: `sellerEmail`. Returns `{ messages }`, newest first, capped at 100, with listing title, image, and price. `400` for a missing or invalid email; `500` when the service-role key is absent or Supabase fails. |
 | `POST` | `/api/messages` | Send a message. Body: `listing_id`, `buyer_email`, `message`. Returns `201 { message }`, `400` on validation failure, or `404` when the listing is missing. Messages appear in the seller inbox but no automatic email is sent. |
+| `POST` | `/api/stripe/connect/onboard` | Start or resume seller onboarding. Body: `{ email }`. Returns `{ url }` (Stripe onboarding link) while details are still needed, or `{ status }` (`charges_enabled`, `payouts_enabled`, `details_submitted`) once the seller has submitted everything. `400` for an invalid email, `409` if the linked Stripe account no longer exists, `502` on Stripe errors, `503` when payments are not configured. |
+| `GET` | `/api/stripe/connect/status` | Seller payout status. Query param: `email`. Returns `{ status }` with the three flags above, or `{ status: null }` when the email has not started onboarding. Not cached. `400`, `502`, `503` as above. |
+| `POST` | `/api/checkout` | Start Checkout for a listing. Body: `{ listingId, holdToken? }`. The amount comes from the database, never the client. Returns `{ url, holdToken }` to redirect to Stripe Checkout (passing the previous `holdToken` resumes an open session). Blocked purchases return `409 { error, reason }` with a reason from the list above; also `400`, `404`, `502`, `503`. |
+| `POST` | `/api/stripe/webhook` | Stripe webhook. Verifies the `stripe-signature` header, then handles `checkout.session.completed` and `checkout.session.async_payment_succeeded` (record the order) and `checkout.session.expired` (release the hold). Returns `{ received: true }`; `400` for a missing or invalid signature, `500` so Stripe retries on failure, `503` when not configured. |
 
 Validation errors return `{ error: string }` with status `400`. Storage or
 database failures return `500`.
@@ -156,11 +292,33 @@ database failures return `500`.
 1. Push the repository to GitHub.
 2. Import the repository in Vercel.
 3. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
-   `SUPABASE_SERVICE_ROLE_KEY` to Production, Preview, and Development.
-4. Deploy. Pushing to `main` triggers a new production deployment.
-5. Smoke-test the deployment: browse and search, create a listing with a photo,
+   `SUPABASE_SERVICE_ROLE_KEY` to Production, Preview, and Development. For
+   payments also add `STRIPE_SECRET_KEY` (sandbox key) and
+   `PLATFORM_FEE_BPS` if you want a fee. Leave `APP_URL` unset or set it to the
+   production URL.
+4. In the Stripe Dashboard, create a webhook endpoint for the **production**
+   URL `/api/stripe/webhook` with the events `checkout.session.completed`,
+   `checkout.session.async_payment_succeeded`, and `checkout.session.expired`.
+   Put its signing secret in `STRIPE_WEBHOOK_SECRET`. Preview deployments sit
+   behind Vercel deployment protection, so Stripe cannot reach their webhooks.
+5. Deploy. Pushing to `main` triggers a new production deployment.
+6. Smoke-test the deployment: browse and search, create a listing with a photo,
    send a message, then read it in `/messages` using that listing’s seller
-   email. Confirm the service-role key never appears in the browser bundle.
+   email. Confirm the service-role key never appears in the browser bundle. To test
+   payments, run the full flow above against the production URL.
+
+## Testing
+
+```bash
+npm test          # Vitest, once
+npm run check     # tsc --noEmit, eslint, and the tests
+```
+
+`supabase/tests/stripe-connect.sql.test.ts` runs the Stripe Connect migration
+and `supabase/tests/stripe_connect_checks.sql` against an in-memory Postgres
+(PGlite), including a mode without Supabase's automatic grants. The CI workflow
+(`.github/workflows/ci.yml`) runs `npm ci`, `npm run build`, and `npm run check`
+on every push and pull request with read-only repository permissions.
 
 ## Known limitations
 
@@ -175,6 +333,14 @@ database failures return `500`.
   Do not use it for sensitive messages.
 - The public anon key still cannot read the `messages` table; inbox reads use a
   server-only service-role key inside the API route.
+- Payouts are keyed by the typed seller email, with no login. Anyone can claim
+  an email that has not onboarded yet, so this is sandbox/demo only and needs
+  real authentication before any live use.
+- No rate limiting on the onboarding and status endpoints.
+- No refund UI. Refunds only happen automatically when a second payment lands
+  on an already-sold listing.
+- Sold listings stay visible with a “Sold” badge.
+- One item per checkout, USD only.
 - No radius/distance filtering and no pagination; results are capped at 100.
 - The app does not edit or delete listings.
 - Free Supabase projects pause after a period of inactivity, which can make the
@@ -185,7 +351,9 @@ database failures return `500`.
 ```text
 src/
   app/
-    api/            # listings, listing detail, messages, upload
+    api/            # listings, listing detail, messages, upload, checkout, stripe
+    checkout/       # success and cancel pages
+    seller/payments # seller payout setup (Get paid)
     category/[slug] # category pages
     create/         # choose type and create item
     item/[id]       # listing detail
@@ -199,6 +367,7 @@ src/
   lib/              # categories, conditions, formatting, validation, image,
                     # Supabase clients (supabase-admin.ts is server-only)
 supabase/
-  migrations/       # schema, policies, bucket, trigger
+  migrations/       # schema, policies, bucket, trigger, Stripe Connect
+  tests/            # PGlite SQL tests and the manual checks script
   seed.sql          # 12 sample listings
 ```
