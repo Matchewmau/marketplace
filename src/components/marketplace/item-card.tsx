@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ImageWithFallback } from "@/components/marketplace/image-with-fallback";
+import { Badge } from "@/components/ui/badge";
 import { formatLocation, formatPrice, formatRelativeTime } from "@/lib/format";
 import type { Listing } from "@/lib/types";
 
@@ -22,6 +23,14 @@ export function ItemCard({ listing }: ItemCardProps) {
           sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
           className="object-cover transition-transform duration-300 group-hover:scale-[1.025]"
         />
+        {listing.status === "sold" && (
+          <Badge
+            variant="secondary"
+            className="absolute left-2 top-2 bg-gray-900/80 text-white hover:bg-gray-900/80"
+          >
+            Sold
+          </Badge>
+        )}
       </div>
       <div className="p-3.5">
         <p className="text-[17px] font-semibold leading-6 text-gray-800">

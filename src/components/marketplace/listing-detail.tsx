@@ -6,11 +6,17 @@ import { useEffect, useState } from "react";
 
 import { ImageLightbox } from "@/components/marketplace/image-lightbox";
 import { ImageWithFallback } from "@/components/marketplace/image-with-fallback";
+import { BuyNowButton } from "@/components/marketplace/buy-now-button";
 import { MessageSellerForm } from "@/components/marketplace/message-seller-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatLocation, formatPrice, formatRelativeTime } from "@/lib/format";
-import type { Listing } from "@/lib/types";
+import type { Listing, PurchaseState } from "@/lib/types";
+
+const PAYMENTS_UNAVAILABLE: PurchaseState = {
+  buyable: false,
+  reason: "payments_unavailable",
+};
 
 type ListingDetailProps = {
   listingId: string;
@@ -20,7 +26,7 @@ type DetailState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "not-found" }
-  | { status: "success"; listing: Listing };
+  | { status: "success"; listing: Listing; purchase: PurchaseState };
 
 export function ListingDetail({ listingId }: ListingDetailProps) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
@@ -45,6 +51,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
 
         const data = (await response.json().catch(() => null)) as {
           listing?: Listing;
+          purchase?: PurchaseState;
           error?: string;
         } | null;
 
@@ -52,7 +59,11 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
           throw new Error(data?.error ?? "Failed to load listing");
         }
 
-        setState({ status: "success", listing: data.listing });
+        setState({
+          status: "success",
+          listing: data.listing,
+          purchase: data.purchase ?? PAYMENTS_UNAVAILABLE,
+        });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
@@ -119,7 +130,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
     );
   }
 
-  const { listing } = state;
+  const { listing, purchase } = state;
 
   return (
     <div className="space-y-4">
@@ -158,14 +169,21 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
             <h1 className="break-words text-2xl font-semibold text-gray-800">
               {listing.title}
             </h1>
-            <p className="mt-2 text-3xl font-semibold text-gray-800">
-              {formatPrice(listing.price)}
-            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <p className="text-3xl font-semibold text-gray-800">
+                {formatPrice(listing.price)}
+              </p>
+              {listing.status === "sold" && (
+                <Badge variant="secondary">Sold</Badge>
+              )}
+            </div>
             <p className="mt-1 text-sm text-gray-500">
               Listed {formatRelativeTime(listing.created_at)} in{" "}
               {formatLocation(listing.location)}
             </p>
           </div>
+
+          <BuyNowButton listingId={listing.id} purchase={purchase} />
 
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{listing.category}</Badge>
