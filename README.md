@@ -142,7 +142,10 @@ the SQL editor. It should return `ALL CHECKS PASSED` and leaves no data behind.
    marketplace where the platform collects payments and is responsible for
    losses.
 3. Make sure Accounts v2 is available for the sandbox (the app creates
-   recipient accounts through the v2 API).
+   seller accounts through the v2 API). Sellers get Stripe-liable accounts
+   with the full Stripe Dashboard (merchant + recipient configurations),
+   because recipient-only accounts require platform liability and the shared
+   sandbox platform cannot be the losses collector.
 4. Copy the sandbox secret key (`sk_test_…`) from Developers → API keys into
    `STRIPE_SECRET_KEY`.
 

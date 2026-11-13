@@ -156,14 +156,15 @@ describe("createSellerAccount", () => {
 
     expect(create).toHaveBeenCalledTimes(1);
     const params = create.mock.calls[0][0];
-    expect(params.dashboard).toBe("express");
+    expect(params.dashboard).toBe("full");
     expect(params.contact_email).toBe("seller@example.com");
+    expect(params.configuration.merchant.capabilities.card_payments.requested).toBe(true);
     expect(
       params.configuration.recipient.capabilities.stripe_balance.stripe_transfers.requested,
     ).toBe(true);
     expect(params.defaults.responsibilities).toEqual({
-      fees_collector: "application",
-      losses_collector: "application",
+      fees_collector: "stripe",
+      losses_collector: "stripe",
     });
     expect(params.include).toEqual([...ACCOUNT_INCLUDE]);
     expect(params.include).toEqual(["configuration.recipient", "identity", "requirements"]);

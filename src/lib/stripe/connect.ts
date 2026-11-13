@@ -64,8 +64,12 @@ export function normalizeAccountStatus(
 }
 
 /**
- * Creates a recipient account for the email. No idempotency key: a replayed key would resurrect a
- * deleted account after an unbind, and concurrent creates are resolved by the unique constraint.
+ * Creates a Stripe-liable seller account for the email. Stripe is the fees and losses collector
+ * because the shared sandbox platform cannot be the losses collector. Recipient-only accounts
+ * require platform liability, so the merchant configuration and the full Stripe Dashboard are
+ * required. Destination charges still route funds through `stripe_transfers`, which Buy Now gating
+ * reads. No idempotency key: a replayed key would resurrect a deleted account after an unbind, and
+ * concurrent creates are resolved by the unique constraint.
  */
 export async function createSellerAccount(
   stripe: Stripe,
@@ -74,15 +78,16 @@ export async function createSellerAccount(
   const account = await stripe.v2.core.accounts.create({
     contact_email: email,
     display_name: email,
-    dashboard: "express",
+    dashboard: "full",
     identity: { country: "us" },
     configuration: {
+      merchant: { capabilities: { card_payments: { requested: true } } },
       recipient: {
         capabilities: { stripe_balance: { stripe_transfers: { requested: true } } },
       },
     },
     defaults: {
-      responsibilities: { fees_collector: "application", losses_collector: "application" },
+      responsibilities: { fees_collector: "stripe", losses_collector: "stripe" },
     },
     metadata: { seller_email: email },
     include: [...ACCOUNT_INCLUDE],
