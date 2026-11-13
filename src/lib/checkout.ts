@@ -278,12 +278,11 @@ export async function createCheckoutForListing(
   });
   if (registryError && registryError.code !== "23505") {
     console.error(LOG_PREFIX, "register checkout session", safeErrorMessage(registryError.message));
-    try {
-      await stripe.checkout.sessions.expire(session.id);
-    } catch (err) {
-      console.error(LOG_PREFIX, "expire session", safeErrorMessage(err));
+    // Release the hold only once the session can no longer be paid; otherwise its TTL clears it
+    // and the listing is not resold while a payable session exists.
+    if (await expireSession(stripe, session.id)) {
+      await releaseHold(admin, listing.id, hold);
     }
-    await releaseHold(admin, listing.id, hold);
     return { ok: false, status: 500, error: START_ERROR };
   }
 

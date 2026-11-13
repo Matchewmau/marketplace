@@ -101,7 +101,7 @@ Stripe variables:
 | `PLATFORM_FEE_BPS` | Optional platform fee in basis points, `0`–`10000`. Defaults to `1000` (10%). `0` turns the fee off. The Get paid page shows the fee to sellers. |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Public (browser-exposed) publishable key, `pk_test_…`. Unused by the app because Checkout is a hosted redirect. |
 | `APP_URL` | Origin used for Stripe onboarding return URLs and as the fallback for Checkout returns. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, set it to the production URL (recommended); if unset, the request origin is used. Checkout returns buyers to the origin they clicked Buy Now on when that origin is one of the app's known origins (the request origin, `APP_URL`, or the Vercel deployment URLs), otherwise to `APP_URL`. When self-hosting behind a proxy, set `APP_URL` to the public URL. |
-| `APP_SCOPE` | Optional unique id for this environment: a letter or digit first, then letters, digits, `.`, `_`, `:`, `-`, at most 100 characters. Lowercased and stored as `env:<value>`. Defaults to the Supabase project host. Required when `NEXT_PUBLIC_SUPABASE_URL` is a local Supabase (`localhost`, `127.0.0.1`, …) so environments sharing one Stripe sandbox never handle each other's checkouts; without it checkout is disabled. An invalid value disables checkout and makes the webhook return `503` until it is fixed. |
+| `APP_SCOPE` | Optional unique id for this environment: a letter or digit first, then letters, digits, `.`, `_`, `:`, `-`, at most 100 characters. Lowercased and stored as `env:<value>`. Defaults to the Supabase project host. Required when `NEXT_PUBLIC_SUPABASE_URL` is a local Supabase (`localhost`, `127.0.0.1`, …); without it checkout is disabled. An invalid value disables checkout. It is written to Stripe metadata for humans only and never decides what is fulfilled. |
 
 The Stripe publishable key is not needed because the app uses Stripe-hosted
 Checkout. Replace the placeholders with real sandbox values: the server rejects
@@ -134,6 +134,10 @@ The Stripe Connect migration adds listing status, the `seller_accounts`,
 [Database schema](#database-schema)). The registry migration adds the
 `checkout_sessions` table and makes `record_paid_order` accept only registered
 sessions.
+
+**Cutover.** Sessions created by older code are not in the registry and are
+ignored (never fulfilled or refunded). Apply the registry migration and deploy
+when no checkout has started in the last ~40 minutes.
 
 To check the migration, paste `supabase/tests/stripe_connect_checks.sql` into
 the SQL editor. It should return `ALL CHECKS PASSED` and leaves no data behind.
@@ -186,21 +190,16 @@ if the CLI is not running. Webhooks cover closed tabs and expired sessions.
 
 Each Checkout Session carries an `app_scope` metadata value: `env:<APP_SCOPE>` if
 set, otherwise the host of `NEXT_PUBLIC_SUPABASE_URL` (for example
-`xyz.supabase.co`). The webhook and the success page ignore sessions whose
-`app_scope` differs from their own, so environments sharing one Stripe sandbox
-with a different Supabase project or a different `APP_SCOPE` never record or
-refund each other's checkouts. Environments sharing one Supabase project share
-a scope, which is fine because they share the data. A local Supabase host is the
-same for every developer, so set a unique `APP_SCOPE` when using one.
-
-Changing the app scope (setting or changing `APP_SCOPE`, or changing the
-Supabase URL) makes checkouts opened before the change unrecognised. Change it
-only when no checkout has been started in the last ~40 minutes. Webhook retries
-still pending for sessions paid just before a scope change are ignored after it;
-resend them if needed.
+`xyz.supabase.co`). It is informational only: Stripe
+metadata can be edited by anyone with the shared sandbox key, so it never gates
+anything. The webhook and the success page fulfil only sessions registered in
+this app's own `checkout_sessions` table (a session registered here is never
+in another environment's database), so environments sharing one Stripe sandbox
+never record or refund each other's checkouts. A registered paid session whose
+amount, seller or fee does not match its registry row is refunded and logged.
 
 Stripe retries failed webhook deliveries only for a limited time (a few hours in
-a sandbox, up to 3 days live). After fixing the app scope or webhook
+a sandbox, up to 3 days live). After fixing the database or webhook
 configuration, resend failed `checkout.session.completed` events from the Stripe
 Dashboard (Developers, Events or Webhooks) or with `stripe events resend <evt_id>`.
 A resent event for a listing that has since been sold is refunded automatically.
@@ -306,7 +305,10 @@ All are executable by `service_role` only.
   Checkout Session on the hold.
 - `release_listing_hold(listing_id, hold_token)`: removes the hold.
 - `record_paid_order(...)`: records a paid session as an order and marks the
-  listing sold; idempotent, and returns `refund_pending` if the listing was
+  listing sold. The session must be registered in `checkout_sessions` with a
+  matching listing, amount, seller and fee; otherwise it returns `unrecognized`
+  and records nothing (the app then refunds a registered session and ignores an
+  unregistered one). Idempotent, and returns `refund_pending` if the listing was
   already sold.
 - `mark_order_refunded(session_id, refund_id)`: marks a pending refund done.
 
@@ -324,7 +326,7 @@ All are executable by `service_role` only.
 | `GET` | `/api/stripe/connect/status` | Seller payout status. Query param: `email`. Returns `{ status }` with the three flags above, or `{ status: null }` when the email has not started onboarding. Not cached. `400`, `500`, `502`, `503` as above. |
 | `POST` | `/api/checkout` | Start Checkout for a listing. Body: `{ listingId, holdToken? }`. The amount comes from the database, never the client. Returns `{ url, holdToken }` to redirect to Stripe Checkout (passing the previous `holdToken` resumes an open session). Blocked purchases return `409 { error, reason }` with a reason from the list above; also `400`, `404`, `500`, `502`, `503`. |
 | `POST` | `/api/checkout/cancel` | Cancel the buyer's checkout. Body: `{ listingId, holdToken }` (both UUIDs). Expires the open Checkout Session and releases the hold. Returns `{ result }` where `result` is `cancelled`, `already_paid` (the session was paid), `refunded` (paid, but the item was already sold, so the payment was refunded), or `unknown` (the hold is gone, Stripe could not be reached, or a paid session could not be confirmed yet). `400` for an invalid body, `503` when not configured. |
-| `POST` | `/api/stripe/webhook` | Stripe webhook. Verifies the `stripe-signature` header, then handles `checkout.session.completed` and `checkout.session.async_payment_succeeded` (record the order) and `checkout.session.expired` (release the hold). Sessions whose `app_scope` metadata belongs to another environment (another Supabase project or `APP_SCOPE`) are ignored. Returns `{ received: true }`; `400` for a missing or invalid signature, `500` so Stripe retries on failure, `503` when not configured or, for a correctly signed event, when the app scope is unavailable (Stripe retries for a limited time, a few hours in a sandbox; resend failed events afterwards). |
+| `POST` | `/api/stripe/webhook` | Stripe webhook. Verifies the `stripe-signature` header, then handles `checkout.session.completed` and `checkout.session.async_payment_succeeded` (record the order) and `checkout.session.expired` (release the hold). Sessions not registered in `checkout_sessions` are ignored. Returns `{ received: true }`; `400` for a missing or invalid signature, `500` so Stripe retries on failure (including a failed registry lookup), `503` when not configured. |
 
 Validation errors return `{ error: string }` with status `400`. Storage or
 database failures return `500`.
@@ -352,9 +354,8 @@ and that page posts the saved token to `/api/checkout/cancel` from the browser.
    Listen to events on your own account only (not "Connected accounts"), as
    snapshot events. Put its signing secret in `STRIPE_WEBHOOK_SECRET`. Preview deployments sit
    behind Vercel deployment protection, so Stripe cannot reach their webhooks.
-   The endpoint only handles sessions whose `app_scope` metadata matches
-   production's app scope, so local `stripe listen` sessions on the same
-   sandbox are ignored (and vice versa).
+   The endpoint only handles sessions registered in its own database, so local
+   `stripe listen` sessions on the same sandbox are ignored (and vice versa).
 
    **Webhook setup (shared sandbox).** Instead of the Dashboard, run the
    setup script yourself (it prints the signing secret, so run it only in your
@@ -374,8 +375,7 @@ and that page posts the saved token to `/api/checkout/cancel` from the browser.
    account. The three events are `checkout.session.completed`,
    `checkout.session.async_payment_succeeded`, and `checkout.session.expired`.
    Other candidates' endpoints in the shared sandbox may send you events
-   too; they get a 200 and are ignored because their `app_scope` metadata does
-   not match. Only sessions this app created and registered in
+   too; they get a 200 and are ignored because they are not registered here. Only sessions this app created and registered in
    `checkout_sessions` are fulfilled, so forged sessions made with the shared key
    are ignored. The signing secret is shown once, at creation. If an endpoint with
    this exact URL already exists the script exits; only `--replace` deletes

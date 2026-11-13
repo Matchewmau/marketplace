@@ -3,7 +3,6 @@ import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
-import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 import { handleStripeEvent } from "@/lib/stripe/webhook-handler";
 
 vi.mock("@/lib/fulfillment", () => ({ fulfillCheckoutSession: vi.fn() }));
@@ -19,6 +18,7 @@ const REGISTRY = { listing_id: LISTING_ID, hold_token: HOLD_TOKEN };
 function fakeAdmin(
   rpcError: string | null = null,
   registry: { listing_id: string; hold_token: string } | null = REGISTRY,
+  registryError: string | null = null,
 ) {
   const rpcCalls: RpcCall[] = [];
   const registryQueries: unknown[] = [];
@@ -30,7 +30,10 @@ function fakeAdmin(
           registryQueries.push({ table, column, value });
           return builder;
         },
-        maybeSingle: async () => ({ data: registry, error: null }),
+        maybeSingle: async () =>
+          registryError
+            ? { data: null, error: { message: registryError } }
+            : { data: registry, error: null },
       };
       return builder;
     },
@@ -166,18 +169,11 @@ describe("handleStripeEvent", () => {
     },
   );
 
-  it("throws for expired sessions when this deployment has no app scope so Stripe retries", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
-    const { admin, rpcCalls } = fakeAdmin();
+  it("throws when the registry lookup for an expired session fails so Stripe retries", async () => {
+    const { admin, rpcCalls } = fakeAdmin(null, REGISTRY, "db down");
     await expect(
-      handleStripeEvent(
-        event("checkout.session.expired", {
-          id: "cs_test_6",
-          metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
-        }),
-        { stripe, admin },
-      ),
-    ).rejects.toBeInstanceOf(AppScopeUnavailableError);
+      handleStripeEvent(event("checkout.session.expired", { id: "cs_test_6" }), { stripe, admin }),
+    ).rejects.toThrow("Failed to load checkout session registry: db down");
     expect(rpcCalls).toEqual([]);
   });
 
@@ -194,19 +190,21 @@ describe("handleStripeEvent", () => {
 
   it.each([
     ["no metadata", undefined],
-    ["a missing app_scope", { listing_id: LISTING_ID, hold_token: HOLD_TOKEN }],
-    [
-      "another deployment's app_scope",
-      { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "other.supabase.co" },
-    ],
-  ])("ignores an expired session with %s", async (_label, metadata) => {
+    ["a blank app_scope", { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "" }],
+    ["another deployment's app_scope", { app_scope: "other.supabase.co" }],
+  ])("releases a registered expired session whose metadata has %s", async (_label, metadata) => {
     const { admin, rpcCalls } = fakeAdmin();
     const outcome = await handleStripeEvent(
       event("checkout.session.expired", { id: "cs_test_4", metadata }),
       { stripe, admin },
     );
-    expect(outcome).toBe("ignored");
-    expect(rpcCalls).toEqual([]);
+    expect(outcome).toBe("released");
+    expect(rpcCalls).toEqual([
+      {
+        name: "release_listing_hold",
+        args: { p_listing_id: LISTING_ID, p_hold_token: HOLD_TOKEN },
+      },
+    ]);
   });
 
   it("throws when releasing the expired session's hold fails", async () => {

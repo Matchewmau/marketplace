@@ -15,14 +15,6 @@ const LOOPBACK_IPV4_PATTERN = /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 // IPv4-mapped loopback (::ffff:127.x.y.z) as serialized by the WHATWG URL parser.
 const MAPPED_LOOPBACK_PATTERN = /^\[::ffff:(7f[0-9a-f]{2}:[0-9a-f]{1,4}|127\.\d{1,3}\.\d{1,3}\.\d{1,3})\]$/;
 
-/** Thrown when this deployment has no app scope, so paid sessions must be retried, not dropped. */
-export class AppScopeUnavailableError extends Error {
-  constructor(message = "App scope is unavailable: set a valid APP_SCOPE or NEXT_PUBLIC_SUPABASE_URL.") {
-    super(message);
-    this.name = "AppScopeUnavailableError";
-  }
-}
-
 function isLocalHostname(hostname: string): boolean {
   const base = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname;
   return (
@@ -35,11 +27,9 @@ function isLocalHostname(hostname: string): boolean {
 
 /**
  * Identifies this deployment's Checkout Sessions. An explicit APP_SCOPE wins (stored as
- * `env:<value>`); otherwise the Supabase project host (e.g. `xyz.supabase.co`). Environments that
- * share one Stripe sandbox but use different scopes ignore each other's sessions instead of
- * refunding them.
- * Null (checkout disabled; fulfilment and webhooks fail, and Stripe retries deliveries only for a
- * limited time, a few hours in a sandbox, so failed events may need resending) when APP_SCOPE is invalid, when
+ * `env:<value>`); otherwise the Supabase project host (e.g. `xyz.supabase.co`). Written to Stripe
+ * metadata for humans only: it is forgeable, so the checkout registry decides what is fulfilled.
+ * Null (checkout disabled; fulfilment does not depend on it) when APP_SCOPE is invalid, when
  * NEXT_PUBLIC_SUPABASE_URL is unset or invalid, or when it points at a local Supabase without
  * APP_SCOPE: default local hosts are identical for every developer, so they are not unique.
  */

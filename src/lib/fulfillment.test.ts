@@ -3,7 +3,6 @@ import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
-import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 
 const LISTING_ID = "11111111-1111-4111-8111-111111111111";
 const HOLD_TOKEN = "22222222-2222-4222-8222-222222222222";
@@ -28,7 +27,12 @@ type RpcCall = { name: string; args: Record<string, unknown> };
 
 function fakeAdmin(
   recordResults: string[],
-  opts: { listingExists?: boolean; markError?: string; registry?: RegistryRow | null } = {},
+  opts: {
+    listingExists?: boolean;
+    markError?: string;
+    registry?: RegistryRow | null;
+    registryError?: string;
+  } = {},
 ) {
   const rpcCalls: RpcCall[] = [];
   const listingQueries: unknown[] = [];
@@ -47,6 +51,7 @@ function fakeAdmin(
         },
         maybeSingle: async () => {
           if (table === "checkout_sessions") {
+            if (opts.registryError) return { data: null, error: { message: opts.registryError } };
             return { data: opts.registry === undefined ? REGISTRY : opts.registry, error: null };
           }
           return { data: opts.listingExists === false ? null : { id: LISTING_ID }, error: null };
@@ -120,6 +125,7 @@ beforeEach(() => {
   refundCreate.mockReset();
   refundList.mockReset();
   vi.spyOn(console, "warn").mockImplementation(() => {}).mockClear();
+  vi.spyOn(console, "error").mockImplementation(() => {}).mockClear();
   retrieve.mockResolvedValue(session());
   refundCreate.mockResolvedValue({ id: "re_test_1", status: "succeeded" });
   refundList.mockResolvedValue({ data: [] });
@@ -196,11 +202,25 @@ describe("fulfillCheckoutSession", () => {
     expect(rpcCalls.filter((c) => c.name === "mark_order_refunded")).toHaveLength(1);
   });
 
-  it("returns not_paid for an unpaid session without touching the database", async () => {
-    retrieve.mockResolvedValue(session({ paid: false }));
+  it("returns not_paid with the registry listing for an unpaid registered session", async () => {
+    retrieve.mockResolvedValue(
+      session({
+        paid: false,
+        metadata: { listing_id: "33333333-3333-4333-8333-333333333333" },
+      }),
+    );
     const { admin, rpcCalls } = fakeAdmin([]);
     const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result.outcome).toBe("not_paid");
+    expect(result).toEqual({ outcome: "not_paid", listingId: LISTING_ID, amountCents: 1999 });
+    expect(rpcCalls).toEqual([]);
+    expect(refundCreate).not.toHaveBeenCalled();
+  });
+
+  it("ignores an unregistered unpaid session without leaking its metadata listing", async () => {
+    retrieve.mockResolvedValue(session({ paid: false }));
+    const { admin, rpcCalls } = fakeAdmin([], { registry: null });
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result).toEqual({ outcome: "ignored", listingId: null, amountCents: 1999 });
     expect(rpcCalls).toEqual([]);
   });
 
@@ -218,21 +238,40 @@ describe("fulfillCheckoutSession", () => {
 
   it.each([
     ["no metadata", null],
-    ["a missing app_scope", { listing_id: LISTING_ID, seller_account_id: "acct_seller_1" }],
-    [
-      "another deployment's app_scope",
-      { listing_id: LISTING_ID, seller_account_id: "acct_seller_1", app_scope: "other.supabase.co" },
-    ],
-  ])("ignores a paid session with %s", async (_label, metadata) => {
+    ["a blank app_scope", { listing_id: LISTING_ID, app_scope: "" }],
+    ["another deployment's app_scope", { listing_id: "x", app_scope: "other.supabase.co" }],
+    ["a forged listing and hold", { listing_id: "x", hold_token: "y", app_scope: APP_SCOPE }],
+  ])("fulfils a registered session whose metadata has %s", async (_label, metadata) => {
     retrieve.mockResolvedValue(session({ metadata }));
-    const { admin, rpcCalls, listingQueries, registryQueries } = fakeAdmin(["recorded"]);
+    const { admin, rpcCalls } = fakeAdmin(["recorded"]);
     const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result.outcome).toBe("ignored");
+    expect(result).toEqual({ outcome: "recorded", listingId: LISTING_ID, amountCents: 1999 });
+    expect(rpcCalls.map((c) => c.name)).toEqual(["record_paid_order"]);
+    expect(rpcCalls[0].args).toMatchObject({ p_listing_id: LISTING_ID });
+  });
+
+  it.each([
+    ["no metadata", null],
+    ["a blank app_scope", { listing_id: LISTING_ID, app_scope: "" }],
+    ["this deployment's app_scope", { listing_id: LISTING_ID, app_scope: APP_SCOPE }],
+    ["another deployment's app_scope", { listing_id: LISTING_ID, app_scope: "other.supabase.co" }],
+  ])("ignores an unregistered paid session with %s", async (_label, metadata) => {
+    retrieve.mockResolvedValue(session({ metadata }));
+    const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"], { registry: null });
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result).toEqual({ outcome: "ignored", listingId: null, amountCents: 1999 });
     expect(rpcCalls).toEqual([]);
     expect(listingQueries).toEqual([]);
-    expect(registryQueries).toEqual([]);
     expect(refundCreate).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when the registry lookup fails so the webhook is retried", async () => {
+    const { admin, rpcCalls } = fakeAdmin(["recorded"], { registryError: "db down" });
+    await expect(
+      fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin }),
+    ).rejects.toThrow("Failed to load checkout session registry: db down");
+    expect(rpcCalls).toEqual([]);
+    expect(refundCreate).not.toHaveBeenCalled();
   });
 
   it("ignores a forged paid session that is not in the registry, without refunding", async () => {
@@ -268,17 +307,55 @@ describe("fulfillCheckoutSession", () => {
   });
 
   it.each([
-    ["amount", { ...REGISTRY, amount_cents: 2500 }],
-    ["destination", { ...REGISTRY, seller_stripe_account_id: "acct_other" }],
-    ["fee", { ...REGISTRY, application_fee_cents: 0 }],
-  ])("ignores a registered session whose %s does not match", async (_label, registry) => {
-    const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"], { registry });
-    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result.outcome).toBe("ignored");
-    expect(rpcCalls).toEqual([]);
-    expect(listingQueries).toEqual([]);
-    expect(refundCreate).not.toHaveBeenCalled();
-    expect(console.warn).toHaveBeenCalledTimes(1);
+    ["amount_cents", { ...REGISTRY, amount_cents: 2500 }, 2500, 1999],
+    [
+      "seller_stripe_account_id",
+      { ...REGISTRY, seller_stripe_account_id: "acct_other" },
+      "acct_other",
+      "acct_seller_1",
+    ],
+    ["application_fee_cents", { ...REGISTRY, application_fee_cents: 0 }, 0, 99],
+  ])(
+    "refunds a registered session whose %s does not match, logging expected and actual",
+    async (field, registry, expected, actual) => {
+      const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"], { registry });
+      const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+      expect(result).toEqual({
+        outcome: "refunded_unavailable",
+        listingId: LISTING_ID,
+        amountCents: 1999,
+      });
+      expect(refundCreate).toHaveBeenCalledWith(
+        { payment_intent: "pi_test_1", reverse_transfer: true, refund_application_fee: true },
+        { idempotencyKey: `refund:${SESSION_ID}` },
+      );
+      expect(rpcCalls).toEqual([]);
+      expect(listingQueries).toEqual([]);
+      expect(vi.mocked(console.error).mock.calls[0][2]).toMatchObject({
+        sessionId: SESSION_ID,
+        mismatches: { [field]: { expected, actual } },
+      });
+    },
+  );
+
+  it("omits refund_application_fee when refunding a mismatch with no platform fee", async () => {
+    retrieve.mockResolvedValue(session({ fee: null }));
+    const { admin } = fakeAdmin([], {
+      registry: { ...REGISTRY, application_fee_cents: 0, amount_cents: 1 },
+    });
+    await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(refundCreate.mock.calls[0][0]).toEqual({
+      payment_intent: "pi_test_1",
+      reverse_transfer: true,
+    });
+  });
+
+  it("throws when refunding a mismatched session fails so the webhook is retried", async () => {
+    refundCreate.mockRejectedValue(new Error("stripe down"));
+    const { admin } = fakeAdmin([], { registry: { ...REGISTRY, amount_cents: 2500 } });
+    await expect(
+      fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin }),
+    ).rejects.toThrow("stripe down");
   });
 
   it("treats a missing platform fee as 0 when comparing with the registry", async () => {
@@ -290,65 +367,20 @@ describe("fulfillCheckoutSession", () => {
     expect(result.outcome).toBe("recorded");
   });
 
-  it("maps an unrecognized record_paid_order result to ignored without refunding", async () => {
+  it("refunds a registered session that record_paid_order does not recognise, logging an error", async () => {
     const { admin, rpcCalls } = fakeAdmin(["unrecognized"]);
     const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result.outcome).toBe("ignored");
+    expect(result).toEqual({
+      outcome: "refunded_unavailable",
+      listingId: LISTING_ID,
+      amountCents: 1999,
+    });
     expect(rpcCalls.map((c) => c.name)).toEqual(["record_paid_order"]);
-    expect(refundCreate).not.toHaveBeenCalled();
-  });
-
-  it("ignores another deployment's session even when its listing is missing here", async () => {
-    retrieve.mockResolvedValue(
-      session({
-        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "other.supabase.co" },
-      }),
+    expect(refundCreate).toHaveBeenCalledWith(
+      { payment_intent: "pi_test_1", reverse_transfer: true, refund_application_fee: true },
+      { idempotencyKey: `refund:${SESSION_ID}` },
     );
-    const { admin, rpcCalls, listingQueries } = fakeAdmin([], { listingExists: false });
-    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result).toEqual({ outcome: "ignored", listingId: null, amountCents: 1999 });
-    expect(listingQueries).toEqual([]);
-    expect(rpcCalls).toEqual([]);
-    expect(refundCreate).not.toHaveBeenCalled();
-  });
-
-  it("ignores an unpaid session from another deployment", async () => {
-    retrieve.mockResolvedValue(
-      session({ paid: false, metadata: { listing_id: LISTING_ID, app_scope: "other.supabase.co" } }),
-    );
-    const { admin, rpcCalls } = fakeAdmin([]);
-    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
-    expect(result.outcome).toBe("ignored");
-    expect(rpcCalls).toEqual([]);
-  });
-
-  it("throws AppScopeUnavailableError without touching anything when there is no app scope", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
-    const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"]);
-    await expect(
-      fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin }),
-    ).rejects.toBeInstanceOf(AppScopeUnavailableError);
-    expect(retrieve).not.toHaveBeenCalled();
-    expect(listingQueries).toEqual([]);
-    expect(rpcCalls).toEqual([]);
-    expect(refundCreate).not.toHaveBeenCalled();
-  });
-
-  it("never refunds another developer's session when both use the default local Supabase", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
-    retrieve.mockResolvedValue(
-      session({
-        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: "127.0.0.1:54321" },
-      }),
-    );
-    const { admin, rpcCalls, listingQueries } = fakeAdmin([], { listingExists: false });
-    await expect(
-      fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin }),
-    ).rejects.toBeInstanceOf(AppScopeUnavailableError);
-    expect(retrieve).not.toHaveBeenCalled();
-    expect(listingQueries).toEqual([]);
-    expect(rpcCalls).toEqual([]);
-    expect(refundCreate).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain(SESSION_ID);
   });
 
   it("refunds without recording an order when the listing was deleted", async () => {

@@ -2,7 +2,6 @@ import React, { type ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
-import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 import { getStripe } from "@/lib/stripe/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
@@ -35,14 +34,14 @@ beforeEach(() => {
 });
 
 describe("CheckoutSuccessPage", () => {
-  it("shows the confirming message when the app scope is unavailable", async () => {
-    vi.mocked(fulfillCheckoutSession).mockRejectedValue(new AppScopeUnavailableError());
+  it("shows the confirming message when fulfilment fails", async () => {
+    vi.mocked(fulfillCheckoutSession).mockRejectedValue(new Error("db down"));
     const page = await CheckoutSuccessPage({
       searchParams: Promise.resolve({ session_id: "cs_test_abc123" }),
     });
     const text = textOf(page);
     expect(text).toContain("Confirming your payment");
     expect(text).toContain("We're confirming your payment");
-    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("app scope unavailable");
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).toContain("db down");
   });
 });

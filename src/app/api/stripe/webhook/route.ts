@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 
-import { getAppScope } from "@/lib/stripe/app-scope";
 import { readStripeEnv } from "@/lib/stripe/config";
 import { safeErrorMessage } from "@/lib/stripe/connect";
 import { getStripe } from "@/lib/stripe/server";
@@ -40,14 +39,6 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error(LOG_PREFIX, safeErrorMessage(err));
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
-  }
-
-  // Checked after the signature so unsigned requests get 400 and do not log scope errors. Without
-  // a scope no session can be matched; a 503 makes Stripe retry for a limited time (a few hours in
-  // a sandbox, up to 3 days live), so resend failed events after fixing it.
-  if (!getAppScope()) {
-    console.error(LOG_PREFIX, "app scope unavailable");
-    return NextResponse.json({ error: NOT_CONFIGURED }, { status: 503 });
   }
 
   try {

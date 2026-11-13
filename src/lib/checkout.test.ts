@@ -10,7 +10,6 @@ import {
 } from "@/lib/checkout";
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
 import { PURCHASE_REASON_TEXT } from "@/lib/purchase";
-import { AppScopeUnavailableError } from "@/lib/stripe/app-scope";
 
 vi.mock("@/lib/fulfillment", () => ({ fulfillCheckoutSession: vi.fn() }));
 
@@ -477,12 +476,15 @@ describe("createCheckoutForListing", () => {
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("sk_test_secret123");
   });
 
-  it("still releases the hold when expiring after a failed registration throws", async () => {
-    expire.mockRejectedValue(new Error("stripe down"));
+  it("keeps the hold when expiring after a failed registration throws", async () => {
+    expire.mockRejectedValue(new Error("stripe down sk_test_secret123"));
     const { admin, rpcCalls } = setup({ insertError: { code: "XX000", message: "db down" } });
     const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
     expect(result).toMatchObject({ ok: false, status: 500 });
-    expect(rpcCalls.map((c) => c.name)).toEqual(["reserve_listing", "release_listing_hold"]);
+    expect(expire).toHaveBeenCalledWith("cs_test_new");
+    expect(rpcCalls.map((c) => c.name)).toEqual(["reserve_listing"]);
+    expect(console.error).toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("sk_test_secret123");
   });
 
   it("treats a duplicate registry row (idempotent replay) as success", async () => {
@@ -625,10 +627,8 @@ describe("cancelCheckoutHold", () => {
     },
   );
 
-  it.each([
-    ["a database error", new Error("db down")],
-    ["an unavailable app scope", new AppScopeUnavailableError()],
-  ])("keeps the hold and reports unknown when fulfilment throws %s", async (_label, err) => {
+  it("keeps the hold and reports unknown when fulfilment throws", async () => {
+    const err = new Error("db down");
     retrieve.mockResolvedValue({ id: "cs_test_paid", status: "complete", url: null });
     vi.mocked(fulfillCheckoutSession).mockRejectedValue(err);
     const { admin, rpcCalls } = setup({ holds: [holdRow("cs_test_paid")] });

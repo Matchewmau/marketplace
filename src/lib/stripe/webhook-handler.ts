@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type Stripe from "stripe";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
-import { AppScopeUnavailableError, getAppScope } from "@/lib/stripe/app-scope";
 
 export type WebhookOutcome = "fulfilled" | "released" | "ignored";
 
@@ -18,16 +17,8 @@ export async function handleStripeEvent(
       return outcome === "ignored" ? "ignored" : "fulfilled";
     }
     case "checkout.session.expired": {
-      const appScope = getAppScope();
-      if (!appScope) {
-        // Throw so the webhook fails and Stripe retries once the scope is configured.
-        throw new AppScopeUnavailableError();
-      }
-      if (event.data.object.metadata?.app_scope !== appScope) {
-        // Another deployment sharing this Stripe sandbox owns this session.
-        return "ignored";
-      }
-      // Release using our own registry row, never the (forgeable) session metadata.
+      // Release using our own registry row, never the (forgeable) session metadata. Unregistered
+      // sessions are not ours and are ignored.
       const { data: registered, error: registryError } = await deps.admin
         .from("checkout_sessions")
         .select("listing_id, hold_token")
