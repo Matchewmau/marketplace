@@ -3,6 +3,12 @@ export type GuideValue = {
   value: string;
   copy?: string;
   note?: string;
+  /** Outcome of a test card, shown as a status pill. */
+  tone?: "success" | "danger" | "warning";
+  /** Which seller-setup card the row belongs to. */
+  group?: "identity" | "bank";
+  /** The value is an instruction to read, not a code to copy or type. */
+  instruction?: boolean;
 };
 
 export const QUICK_START: string[] = [
@@ -17,50 +23,77 @@ export const TEST_CARDS: GuideValue[] = [
     label: "Payment succeeds",
     value: "4242 4242 4242 4242",
     copy: "4242424242424242",
+    tone: "success",
   },
   {
     label: "Card is declined",
     value: "4000 0000 0000 0002",
     copy: "4000000000000002",
+    tone: "danger",
   },
   {
     label: "Needs 3D Secure",
     value: "4000 0027 6000 3184",
     copy: "4000002760003184",
+    tone: "warning",
   },
-  { label: "Expiry date", value: "Any future date, e.g. 12/34" },
-  { label: "CVC", value: "Any 3 digits, e.g. 123" },
-  { label: "Name, country, ZIP", value: "Anything" },
+  {
+    label: "Expiry date",
+    value: "Any future date, e.g. 12/34",
+    instruction: true,
+  },
+  { label: "CVC", value: "Any 3 digits, e.g. 123", instruction: true },
+  { label: "Name, country, ZIP", value: "Anything", instruction: true },
 ];
 
 export const ONBOARDING_VALUES: GuideValue[] = [
-  { label: "Phone", value: "Click “Use test phone number”" },
-  { label: "SMS code", value: "000000", copy: "000000" },
-  { label: "Date of birth", value: "01/01/1901", copy: "01/01/1901" },
+  {
+    label: "Phone",
+    value: "Click “Use test phone number”",
+    group: "identity",
+    instruction: true,
+  },
+  { label: "SMS code", value: "000000", copy: "000000", group: "identity" },
+  {
+    label: "Date of birth",
+    value: "01/01/1901",
+    copy: "01/01/1901",
+    group: "identity",
+  },
   {
     label: "SSN",
     value: "000-00-0000",
     copy: "000-00-0000",
     note: "If asked for the last 4 digits, use 0000.",
+    group: "identity",
   },
   {
     label: "Address line 1",
     value: "address_full_match",
     copy: "address_full_match",
     note: "Any real US city, state and ZIP.",
+    group: "identity",
   },
   {
     label: "Payout bank",
     value: "Choose “Test (Non-OAuth)”",
     note: "Avoid the “Invalid” and “Down” test banks.",
+    group: "bank",
+    instruction: true,
   },
   {
     label: "Routing number",
     value: "110000000",
     copy: "110000000",
     note: "Only if you enter bank details manually.",
+    group: "bank",
   },
-  { label: "Account number", value: "000123456789", copy: "000123456789" },
+  {
+    label: "Account number",
+    value: "000123456789",
+    copy: "000123456789",
+    group: "bank",
+  },
 ];
 
 export const TESTING_TIPS: string[] = [
