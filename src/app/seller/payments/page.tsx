@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { BackLink } from "@/components/layout/back-link";
+import { StripeConfigError, readPlatformFeeBps } from "@/lib/stripe/config";
 import { SellerPaymentsPanel } from "@/components/marketplace/seller-payments-panel";
 
 export const metadata: Metadata = {
@@ -9,6 +10,14 @@ export const metadata: Metadata = {
 };
 
 export default function SellerPaymentsPage() {
+  let platformFeeBps: number | null;
+  try {
+    platformFeeBps = readPlatformFeeBps();
+  } catch (error) {
+    if (!(error instanceof StripeConfigError)) throw error;
+    platformFeeBps = null;
+  }
+
   return (
     <div className="mx-auto max-w-xl space-y-4">
       <BackLink />
@@ -25,7 +34,7 @@ export default function SellerPaymentsPage() {
           </div>
         }
       >
-        <SellerPaymentsPanel />
+        <SellerPaymentsPanel platformFeeBps={platformFeeBps} />
       </Suspense>
     </div>
   );

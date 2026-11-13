@@ -16,6 +16,7 @@ import { TestingGuideButton } from "@/components/layout/testing-guide";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { platformFeeNotice } from "@/lib/platform-fee";
 import { isTrustedStripeUrl } from "@/lib/stripe/redirect";
 import type { PublicSellerStatus } from "@/lib/types";
 import { isValidEmail } from "@/lib/validation";
@@ -117,7 +118,13 @@ const PRIMARY_BUTTON =
 const SECONDARY_BUTTON =
   "h-11 w-full px-4 focus-visible:ring-2 focus-visible:ring-brand sm:w-auto";
 
-export function SellerPaymentsPanel() {
+export function SellerPaymentsPanel({
+  platformFeeBps,
+}: {
+  platformFeeBps: number | null;
+}) {
+  const feeNotice =
+    platformFeeBps === null ? null : platformFeeNotice(platformFeeBps);
   const searchParams = useSearchParams();
   const onboarding = searchParams.get("onboarding");
 
@@ -497,6 +504,7 @@ export function SellerPaymentsPanel() {
       </div>
 
       <div className="space-y-2 px-1">
+        {feeNotice && <p className="text-xs text-gray-500">{feeNotice}</p>}
         <p className="text-xs text-gray-500">
           Demo only: payouts are linked to the email you enter, not to a login.
           Use Stripe test data during onboarding.

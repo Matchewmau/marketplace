@@ -80,7 +80,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 # Stripe (sandbox only)
 STRIPE_SECRET_KEY=sk_test_replace_me
 STRIPE_WEBHOOK_SECRET=whsec_replace_me
-PLATFORM_FEE_BPS=0
+PLATFORM_FEE_BPS=1000
 APP_URL=https://localhost:3000
 ```
 
@@ -97,7 +97,8 @@ Stripe variables (all server-only):
 | --- | --- |
 | `STRIPE_SECRET_KEY` | Sandbox secret or restricted key only (`sk_test_` or `rk_test_`). The server refuses anything else, including live keys. |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret (`whsec_…`) for the webhook endpoint. Required by `/api/stripe/webhook`. |
-| `PLATFORM_FEE_BPS` | Optional platform fee in basis points, `0`–`10000`. Defaults to `0`. |
+| `PLATFORM_FEE_BPS` | Optional platform fee in basis points, `0`–`10000`. Defaults to `1000` (10%). `0` turns the fee off. The Get paid page shows the fee to sellers. |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Set as the assignment asks. Not used by the app, because Checkout is a hosted redirect. |
 | `APP_URL` | Origin used for Stripe onboarding return URLs and as the fallback for Checkout returns. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, set it to the production URL (recommended); if unset, the request origin is used. Checkout returns buyers to the origin they clicked Buy now on when that origin is one of the app's known origins (the request origin, `APP_URL`, or the Vercel deployment URLs), otherwise to `APP_URL`. When self-hosting behind a proxy, set `APP_URL` to the public URL. |
 | `APP_SCOPE` | Optional unique id for this environment: a letter or digit first, then letters, digits, `.`, `_`, `:`, `-`, at most 100 characters. Lowercased and stored as `env:<value>`. Defaults to the Supabase project host. Required when `NEXT_PUBLIC_SUPABASE_URL` is a local Supabase (`localhost`, `127.0.0.1`, …) so environments sharing one Stripe sandbox never handle each other's checkouts; without it checkout is disabled. An invalid value disables checkout and makes the webhook return `503` until it is fixed. |
 
@@ -324,7 +325,7 @@ and that page posts the saved token to `/api/checkout/cancel` from the browser.
 3. Add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and
    `SUPABASE_SERVICE_ROLE_KEY` to Production, Preview, and Development. For
    payments also add `STRIPE_SECRET_KEY` (sandbox key) and
-   `PLATFORM_FEE_BPS` if you want a fee. Set `APP_URL` to the production URL
+   `PLATFORM_FEE_BPS` to override the 10% default fee. Set `APP_URL` to the production URL
    (recommended) so Stripe onboarding redirects always go to the production
    domain; if it is unset, the request origin is used. Checkout returns buyers
    to the origin they started from when it is one of the app's known origins
