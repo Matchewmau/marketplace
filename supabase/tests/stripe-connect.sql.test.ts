@@ -1,25 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterEach, describe, expect, it } from "vitest";
 
-const root = path.resolve(__dirname, "..", "..");
-const readSql = (rel: string) => fs.readFileSync(path.resolve(root, rel), "utf8");
-
-const BOOTSTRAP = `
-create role anon nologin;
-create role authenticated nologin;
-create role service_role nologin bypassrls;
-grant usage on schema public to anon, authenticated, service_role;
-alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
-alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
-grant anon, authenticated, service_role to current_user;
-create schema storage;
-create table storage.buckets (id text primary key, name text, public boolean);
-create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text);
-alter table storage.objects enable row level security;
-`;
+import { BOOTSTRAP, initSql, readSql } from "./harness";
 
 const NO_SERVICE_ROLE_AUTO_GRANTS = `
 alter default privileges in schema public revoke all on tables from service_role;
@@ -37,11 +19,7 @@ async function migratedDb(migrationSql = readSql(MIGRATION), autoGrants = true):
     // Supabase projects can disable automatic grants: service_role then relies on explicit ones.
     await db.exec(NO_SERVICE_ROLE_AUTO_GRANTS);
   }
-  const init = readSql("supabase/migrations/20261109000000_init_marketplace.sql").replace(
-    /^create extension if not exists pgcrypto;\s*$/m,
-    "",
-  );
-  await db.exec(init);
+  await db.exec(initSql());
   await db.exec(migrationSql);
   return db;
 }

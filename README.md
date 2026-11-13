@@ -121,8 +121,10 @@ The migration creates:
 - Row-level security policies: public read and insert for listings, insert-only
   for messages, and public read/insert for listing images.
 
-The seed inserts 12 sample listings, including one free listing. The seed is
-optional; the app works with an empty database.
+The seed inserts 24 sample listings from four demo sellers
+(`demo.seller1@example.com` to `demo.seller4@example.com`) across 12 categories.
+Buy now stays off for a demo seller's listings until you connect that email on
+the Get paid page. The seed is optional; the app works with an empty database.
 
 The Stripe Connect migration adds listing status, the `seller_accounts`,
 `listing_holds` and `orders` tables, and the SQL functions used by checkout (see
@@ -412,5 +414,5 @@ src/
 supabase/
   migrations/       # schema, policies, bucket, trigger, Stripe Connect
   tests/            # PGlite SQL tests and the manual checks script
-  seed.sql          # 12 sample listings
+  seed.sql          # 24 sample listings
 ```
