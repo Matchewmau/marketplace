@@ -65,9 +65,15 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
         <SlidersHorizontal className="size-4" aria-hidden="true" />
         Filters
         {activeCount > 0 && (
-          <span className="rounded-full bg-[#E7F3FF] px-2 py-0.5 text-xs font-semibold text-[#1877F2]">
-            {activeCount}
-          </span>
+          <>
+            <span
+              aria-hidden="true"
+              className="rounded-full bg-[#E7F3FF] px-2 py-0.5 text-xs font-semibold text-[#1877F2]"
+            >
+              {activeCount}
+            </span>
+            <span className="sr-only">, {activeCount} active</span>
+          </>
         )}
         <ChevronDown
           aria-hidden="true"
