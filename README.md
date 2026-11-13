@@ -349,7 +349,11 @@ and that page posts the saved token to `/api/checkout/cancel` from the browser.
    ```bash
    node --env-file=.env.local scripts/create-webhook.mjs            # create
    node --env-file=.env.local scripts/create-webhook.mjs --dry-run  # plan only, creates nothing
+   node --env-file=.env.local scripts/create-webhook.mjs --replace  # create the new endpoint first, then remove the old one
    ```
+
+   With `--replace` the script creates the new endpoint first and only then
+   deletes the old one; afterwards update `STRIPE_WEBHOOK_SECRET` and redeploy.
 
    It registers the production URL with `connect: false`, because destination
    charges create their events on the platform account, not on a connected

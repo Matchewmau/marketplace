@@ -41,6 +41,8 @@ function validateUrl(raw) {
     fail("Invalid --url: not a URL");
   }
   if (u.protocol !== "https:") fail("URL must be https");
+  if (u.username || u.password) fail("URL must not contain credentials (user:password@)");
+  if (u.port) fail("URL must not specify a port; use the default https port");
   if (u.pathname !== WEBHOOK_PATH || u.search || u.hash) {
     fail(`URL path must be exactly ${WEBHOOK_PATH}`);
   }
@@ -74,10 +76,16 @@ try {
 
   if (dryRun) {
     const steps = [];
-    if (ours.length && replace) steps.push(`delete ${ours.map((e) => e.id).join(", ")}`);
     if (ours.length && !replace) steps.push("exit 1: matches exist, re-run with --replace");
-    else if (all.length >= ENDPOINT_LIMIT && !ours.length) steps.push("exit 1: endpoint limit reached");
-    else steps.push(`create endpoint for ${EVENTS.join(", ")}`);
+    else if (all.length >= ENDPOINT_LIMIT) steps.push("exit 1: endpoint limit reached");
+    else {
+      steps.push(`create endpoint for ${EVENTS.join(", ")}`);
+      if (ours.length) {
+        steps.push(
+          `then delete ${ours.map((e) => e.id).join(", ")} (their old signing secret stops working)`,
+        );
+      }
+    }
     console.log(`Dry run, plan: ${steps.join("; ")}`);
     process.exit(0);
   }
@@ -88,29 +96,50 @@ try {
         "so re-run with --replace to delete the endpoint(s) with this exact URL and create a fresh one.",
     );
   }
-  if (!ours.length && all.length >= ENDPOINT_LIMIT) {
-    fail("webhook endpoint limit reached on this shared account");
+  if (all.length >= ENDPOINT_LIMIT) {
+    fail(
+      ours.length
+        ? "endpoint limit reached: free a slot first; your existing endpoint was left in place"
+        : "webhook endpoint limit reached on this shared account",
+    );
   }
 
-  // Delete only exact-URL matches; the sandbox is shared.
-  for (const ep of ours) {
-    await stripe.webhookEndpoints.del(ep.id);
-    console.log(`Deleted ${ep.id}`);
+  // Create first, so a failed create never leaves us without an endpoint.
+  let created;
+  try {
+    created = await stripe.webhookEndpoints.create({
+      url,
+      // Destination charges are created on the platform account, so their events come from the
+      // platform, not from connected accounts.
+      connect: false,
+      enabled_events: EVENTS,
+      api_version: API_VERSION,
+      description: `marketplace webhook (${new URL(url).host})`,
+      metadata: { app: "marketplace" },
+    });
+  } catch (err) {
+    console.error(`Stripe error: type=${err?.type} code=${err?.code} message=${err?.message}`);
+    if (ours.length) console.error("Create failed; the existing endpoint(s) were left in place.");
+    process.exit(1);
   }
-
-  const created = await stripe.webhookEndpoints.create({
-    url,
-    // Destination charges are created on the platform account, so their events come from the
-    // platform, not from connected accounts.
-    connect: false,
-    enabled_events: EVENTS,
-    api_version: API_VERSION,
-    description: `marketplace webhook (${new URL(url).host})`,
-    metadata: { app: "marketplace" },
-  });
 
   console.log(`Created endpoint: ${created.id}`);
   console.log(`SIGNING SECRET (shown only once): ${created.secret}`);
+
+  // Delete only exact-URL matches (the sandbox is shared), after the secret is printed.
+  const notDeleted = [];
+  for (const ep of ours) {
+    try {
+      await stripe.webhookEndpoints.del(ep.id);
+      console.log(`Deleted old endpoint ${ep.id}`);
+    } catch (err) {
+      notDeleted.push(ep.id);
+      console.error(`Could not delete ${ep.id}: type=${err?.type} code=${err?.code} message=${err?.message}`);
+    }
+  }
+  if (notDeleted.length) {
+    console.error(`WARNING: old endpoint(s) still exist, delete them later: ${notDeleted.join(", ")}`);
+  }
   console.log("\nNext steps:");
   console.log("1. Add it as STRIPE_WEBHOOK_SECRET in Vercel -> Production.");
   console.log("2. Add it to .env.local only if you run the production webhook locally (local testing normally uses `stripe listen`).");
