@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { Bell, UserRound, Wallet } from "lucide-react";
+import { MessageCircle, UserRound, Wallet } from "lucide-react";
 
 import { FacebookLogo } from "@/components/layout/facebook-logo";
-import { HeaderMessagesLink } from "@/components/layout/header-messages-link";
+import { HeaderNavLink } from "@/components/layout/header-nav-link";
+import { TestingGuideButton } from "@/components/layout/testing-guide";
 
 export function Header() {
   return (
@@ -19,32 +20,12 @@ export function Header() {
           </span>
         </Link>
 
-        <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-          <HeaderMessagesLink />
-          <span
-            title="Notifications"
-            aria-hidden="true"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-600 sm:h-10 sm:w-10"
-          >
-            <Bell className="h-5 w-5" />
-          </span>
-          <Link
-            href="/seller/payments"
-            aria-label="Get paid"
-            title="Get paid"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 sm:h-10 sm:w-10"
-          >
-            <Wallet className="h-5 w-5" />
-          </Link>
-          <Link
-            href="/your-listings"
-            aria-label="Your listings"
-            title="Your listings"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 sm:h-10 sm:w-10"
-          >
-            <UserRound className="h-5 w-5" />
-          </Link>
-        </div>
+        <nav aria-label="Main" className="flex shrink-0 items-center gap-0.5">
+          <HeaderNavLink href="/messages" label="Messages" icon={MessageCircle} />
+          <HeaderNavLink href="/seller/payments" label="Get paid" icon={Wallet} />
+          <HeaderNavLink href="/your-listings" label="Your listings" icon={UserRound} />
+          <TestingGuideButton />
+        </nav>
       </div>
     </header>
   );
