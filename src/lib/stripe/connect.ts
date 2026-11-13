@@ -9,7 +9,7 @@ export const ACCOUNT_INCLUDE: ReadonlyArray<Stripe.V2.Core.AccountRetrieveParams
   "requirements",
 ];
 
-type SellerFlags = Omit<SellerPaymentStatus, "stripe_account_id">;
+type SellerFlags = Omit<SellerPaymentStatus, "stripe_account_id" | "connected_at">;
 
 /** Thrown when the account bound to an email no longer exists in Stripe. */
 export class SellerAccountMissingError extends Error {
@@ -121,7 +121,7 @@ export async function refreshSellerAccount(
 ): Promise<SellerPaymentStatus | null> {
   const { data, error } = await admin
     .from("seller_accounts")
-    .select("stripe_account_id, details_submitted")
+    .select("stripe_account_id, details_submitted, created_at")
     .eq("seller_email", email)
     .maybeSingle();
 
@@ -130,7 +130,11 @@ export async function refreshSellerAccount(
   }
   if (!data) return null;
 
-  const previous = data as { stripe_account_id: string; details_submitted: boolean | null };
+  const previous = data as {
+    stripe_account_id: string;
+    details_submitted: boolean | null;
+    created_at?: string | null;
+  };
   const stripeAccountId = previous.stripe_account_id;
   let account: Stripe.V2.Core.Account;
   try {
@@ -164,16 +168,28 @@ export async function refreshSellerAccount(
     throw new Error(`Failed to update seller account: ${updateError.message}`);
   }
 
-  return { stripe_account_id: stripeAccountId, ...flags };
+  return { stripe_account_id: stripeAccountId, ...flags, connected_at: previous.created_at ?? null };
 }
 
-/** Drops the stripe_account_id before a status is returned from a public route. */
-export function toPublicSellerStatus(status: SellerPaymentStatus): PublicSellerStatus {
-  return {
+/**
+ * Builds the status returned from a public route. The stripe_account_id is never included,
+ * only a masked hint with its last four characters.
+ */
+export function toPublicSellerStatus(
+  status: SellerPaymentStatus,
+  extras: { active_listings?: number } = {},
+): PublicSellerStatus {
+  const publicStatus: PublicSellerStatus = {
     charges_enabled: status.charges_enabled,
     payouts_enabled: status.payouts_enabled,
     details_submitted: status.details_submitted,
+    account_hint: `•••• ${status.stripe_account_id.slice(-4)}`,
+    connected_at: status.connected_at ?? null,
   };
+  if (extras.active_listings !== undefined) {
+    publicStatus.active_listings = extras.active_listings;
+  }
+  return publicStatus;
 }
 
 /** Removes the binding between an email and a specific connected account that no longer exists in Stripe. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Check, CircleHelp, Copy, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -87,6 +87,7 @@ export function TestingGuideButton({
   variant?: "icon" | "link";
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -97,20 +98,31 @@ export function TestingGuideButton({
     };
   }, []);
 
-  async function handleCopy(item: GuideValue) {
-    if (!item.copy) return;
-    try {
-      await navigator.clipboard.writeText(item.copy);
-    } catch {
-      return;
-    }
-    setCopiedKey(item.label);
-    setAnnouncement(`Copied ${item.label}`);
+  function openDialog() {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+  }
+
+  function announce(message: string, key: string | null, durationMs: number) {
+    setCopiedKey(key);
+    setAnnouncement(message);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       setCopiedKey(null);
       setAnnouncement("");
-    }, 1500);
+    }, durationMs);
+  }
+
+  async function handleCopy(item: GuideValue) {
+    if (!item.copy) return;
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(item.copy);
+    } catch {
+      announce("Copy failed — select the text instead", null, 3000);
+      return;
+    }
+    announce(`Copied ${item.label}`, item.label, 1500);
   }
 
   return (
@@ -121,7 +133,7 @@ export function TestingGuideButton({
           aria-label="Testing guide"
           title="How to test payments"
           aria-haspopup="dialog"
-          onClick={() => dialogRef.current?.showModal()}
+          onClick={openDialog}
           className="flex h-11 w-11 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
         >
           <CircleHelp className="h-5 w-5" aria-hidden="true" />
@@ -130,7 +142,7 @@ export function TestingGuideButton({
         <button
           type="button"
           aria-haspopup="dialog"
-          onClick={() => dialogRef.current?.showModal()}
+          onClick={openDialog}
           className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-[#1877F2] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
         >
           <CircleHelp className="h-4 w-4" aria-hidden="true" />
@@ -140,7 +152,7 @@ export function TestingGuideButton({
 
       <dialog
         ref={dialogRef}
-        aria-labelledby="testing-guide-title"
+        aria-labelledby={titleId}
         onClick={(event) => {
           if (event.target === dialogRef.current) dialogRef.current?.close();
         }}
@@ -152,7 +164,7 @@ export function TestingGuideButton({
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2
-                id="testing-guide-title"
+                id={titleId}
                 className="text-lg font-semibold text-gray-900"
               >
                 Testing guide
@@ -202,7 +214,12 @@ export function TestingGuideButton({
             </ul>
           </section>
 
-          <div aria-live="polite" className="sr-only">
+          <div
+            aria-live="polite"
+            className={
+              announcement && !copiedKey ? "mt-4 text-sm text-red-600" : "sr-only"
+            }
+          >
             {announcement}
           </div>
         </div>

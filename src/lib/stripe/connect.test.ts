@@ -9,6 +9,7 @@ import {
   refreshSellerAccount,
   safeErrorMessage,
   SellerAccountMissingError,
+  toPublicSellerStatus,
   unbindSellerAccount,
 } from "@/lib/stripe/connect";
 
@@ -230,7 +231,11 @@ describe("unbindSellerAccount", () => {
 });
 
 describe("refreshSellerAccount", () => {
-  function fakeAdmin(row: { stripe_account_id: string; details_submitted: boolean }) {
+  function fakeAdmin(row: {
+    stripe_account_id: string;
+    details_submitted: boolean;
+    created_at?: string;
+  }) {
     const updates: Record<string, unknown>[] = [];
     const updateFilters: Array<Array<[string, string]>> = [];
     const selected: string[] = [];
@@ -266,6 +271,7 @@ describe("refreshSellerAccount", () => {
     const { admin, updates, selected } = fakeAdmin({
       stripe_account_id: "acct_sticky",
       details_submitted: true,
+      created_at: "2026-01-02T03:04:05.000Z",
     });
     const retrieve = vi
       .fn()
@@ -275,6 +281,7 @@ describe("refreshSellerAccount", () => {
     const status = await refreshSellerAccount(stripe, admin, "seller@example.com");
 
     expect(selected[0]).toContain("details_submitted");
+    expect(selected[0]).toContain("created_at");
     expect(retrieve).toHaveBeenCalledWith("acct_sticky", {
       include: ["configuration.recipient", "identity", "requirements"],
     });
@@ -283,6 +290,7 @@ describe("refreshSellerAccount", () => {
       charges_enabled: false,
       payouts_enabled: false,
       details_submitted: true,
+      connected_at: "2026-01-02T03:04:05.000Z",
     });
     expect(updates).toEqual([
       { charges_enabled: false, payouts_enabled: false, details_submitted: true },
@@ -302,6 +310,7 @@ describe("refreshSellerAccount", () => {
     const status = await refreshSellerAccount(stripe, admin, "seller@example.com");
 
     expect(status?.details_submitted).toBe(false);
+    expect(status?.connected_at).toBeNull();
     expect(updates).toEqual([{ charges_enabled: false, payouts_enabled: false }]);
     expect(updates[0]).not.toHaveProperty("details_submitted");
   });
@@ -345,6 +354,43 @@ describe("refreshSellerAccount", () => {
     expect(error).toBeInstanceOf(SellerAccountMissingError);
     expect((error as SellerAccountMissingError).accountId).toBe("acct_gone");
     expect(updates).toEqual([]);
+  });
+});
+
+describe("toPublicSellerStatus", () => {
+  const status = {
+    stripe_account_id: "acct_1PrivateQ7zK",
+    charges_enabled: true,
+    payouts_enabled: false,
+    details_submitted: true,
+    connected_at: "2026-05-06T07:08:09.000Z",
+  };
+
+  it("masks the account id to its last four characters and keeps connected_at", () => {
+    const result = toPublicSellerStatus(status);
+    expect(result).toEqual({
+      charges_enabled: true,
+      payouts_enabled: false,
+      details_submitted: true,
+      account_hint: "•••• Q7zK",
+      connected_at: "2026-05-06T07:08:09.000Z",
+    });
+    expect(result).not.toHaveProperty("active_listings");
+    const json = JSON.stringify(result);
+    expect(json).not.toContain("stripe_account_id");
+    expect(json).not.toContain("acct_1PrivateQ7zK");
+    expect(json).not.toContain("acct_");
+  });
+
+  it("includes active_listings when given, including zero", () => {
+    expect(toPublicSellerStatus(status, { active_listings: 3 }).active_listings).toBe(3);
+    expect(toPublicSellerStatus(status, { active_listings: 0 }).active_listings).toBe(0);
+  });
+
+  it("defaults a missing connected_at to null", () => {
+    const { connected_at: _omit, ...rest } = status;
+    void _omit;
+    expect(toPublicSellerStatus(rest).connected_at).toBeNull();
   });
 });
 

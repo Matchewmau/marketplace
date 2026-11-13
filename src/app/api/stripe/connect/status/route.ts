@@ -24,6 +24,28 @@ function serverError(message: string) {
   return NextResponse.json({ error: LOAD_ERROR }, { status: 500 });
 }
 
+/** Number of the seller's active listings, or undefined when the count can't be loaded. */
+async function countActiveListings(
+  admin: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
+  email: string,
+): Promise<number | undefined> {
+  try {
+    const { count, error } = await admin
+      .from("listings")
+      .select("id", { count: "exact", head: true })
+      .eq("seller_email", email)
+      .eq("status", "active");
+    if (error) {
+      console.error(LOG_PREFIX, "active listings count:", safeErrorMessage(error.message));
+      return undefined;
+    }
+    return count ?? undefined;
+  } catch (err) {
+    console.error(LOG_PREFIX, "active listings count:", safeErrorMessage(err));
+    return undefined;
+  }
+}
+
 export async function GET(request: Request) {
   const email = normalizeSellerEmail(new URL(request.url).searchParams.get("email"));
   if (!email) {
@@ -51,8 +73,17 @@ export async function GET(request: Request) {
 
   try {
     const status = await refreshSellerAccount(stripe, admin, email);
+    if (!status) {
+      return NextResponse.json({ status: null }, { headers: NO_STORE });
+    }
+    const activeListings = await countActiveListings(admin, email);
     return NextResponse.json(
-      { status: status ? toPublicSellerStatus(status) : null },
+      {
+        status: toPublicSellerStatus(
+          status,
+          activeListings === undefined ? {} : { active_listings: activeListings },
+        ),
+      },
       { headers: NO_STORE },
     );
   } catch (err) {

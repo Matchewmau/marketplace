@@ -18,7 +18,11 @@ type Row = {
   charges_enabled: boolean;
   payouts_enabled: boolean;
   details_submitted: boolean;
+  created_at?: string;
 };
+
+type ListingRow = { seller_email: string; status: "active" | "sold" };
+type ListingsOptions = { listings?: ListingRow[]; countError?: boolean };
 
 type EqCall = [keyof Row, string];
 
@@ -42,9 +46,45 @@ function filterChain(rows: Row[], calls: EqCall[][], apply: (index: number) => v
 }
 
 /** Minimal chainable fake of the seller_accounts queries used by the route. */
-function fakeAdmin(rows: Row[], deleteCalls: EqCall[][] = [], updateCalls: EqCall[][] = []) {
+/** Fake of the head-only exact count query on listings: counts rows matching every .eq(). */
+function listingsCount(options: ListingsOptions) {
+  return {
+    select: (columns: string, opts: { count: string; head: boolean }) => {
+      if (columns !== "id" || opts.count !== "exact" || opts.head !== true) {
+        throw new Error("unexpected listings select");
+      }
+      const filters: Array<[keyof ListingRow, string]> = [];
+      const builder = {
+        eq(column: keyof ListingRow, value: string) {
+          filters.push([column, value]);
+          return builder;
+        },
+        then<T>(resolve: (value: { count: number | null; error: { message: string } | null }) => T) {
+          const result = options.countError
+            ? { count: null, error: { message: "listings down" } }
+            : {
+                count: (options.listings ?? []).filter((l) =>
+                  filters.every(([c, v]) => l[c] === v),
+                ).length,
+                error: null,
+              };
+          return Promise.resolve(result).then(resolve);
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+function fakeAdmin(
+  rows: Row[],
+  deleteCalls: EqCall[][] = [],
+  updateCalls: EqCall[][] = [],
+  listings: ListingsOptions = {},
+) {
   return {
     from(table: string) {
+      if (table === "listings") return listingsCount(listings);
       if (table !== "seller_accounts") throw new Error(`unexpected table ${table}`);
       return {
         select: (columns: string) => ({
@@ -124,43 +164,117 @@ describe("GET /api/stripe/connect/status", () => {
     const rows: Row[] = [
       {
         seller_email: "seller@example.com",
-        stripe_account_id: "acct_known",
+        stripe_account_id: "acct_1Known9xYz",
         charges_enabled: false,
         payouts_enabled: false,
         details_submitted: false,
+        created_at: "2026-03-04T05:06:07.000Z",
       },
     ];
     const updateCalls: EqCall[][] = [];
+    const listings: ListingRow[] = [
+      { seller_email: "seller@example.com", status: "active" },
+      { seller_email: "seller@example.com", status: "active" },
+      { seller_email: "seller@example.com", status: "sold" },
+      { seller_email: "other@example.com", status: "active" },
+    ];
     vi.mocked(getSupabaseAdmin).mockReturnValue(
-      fakeAdmin(rows, [], updateCalls) as unknown as ReturnType<typeof getSupabaseAdmin>,
+      fakeAdmin(rows, [], updateCalls, { listings }) as unknown as ReturnType<
+        typeof getSupabaseAdmin
+      >,
     );
 
     const res = await GET(get("Seller@Example.com"));
 
     expect(res.status).toBe(200);
-    const expected = {
+    const flags = {
       charges_enabled: true,
       payouts_enabled: false,
       details_submitted: true,
     };
     const text = await res.text();
-    expect(JSON.parse(text)).toEqual({ status: expected });
+    expect(JSON.parse(text)).toEqual({
+      status: {
+        ...flags,
+        account_hint: "•••• 9xYz",
+        connected_at: "2026-03-04T05:06:07.000Z",
+        active_listings: 2,
+      },
+    });
     expect(text).not.toContain("stripe_account_id");
-    expect(text).not.toContain("acct_known");
-    expect(retrieve).toHaveBeenCalledWith("acct_known", {
+    expect(text).not.toContain("acct_");
+    expect(text).not.toContain("1Known");
+    expect(retrieve).toHaveBeenCalledWith("acct_1Known9xYz", {
       include: ["configuration.recipient", "identity", "requirements"],
     });
     expect(updateCalls).toEqual([
       [
         ["seller_email", "seller@example.com"],
-        ["stripe_account_id", "acct_known"],
+        ["stripe_account_id", "acct_1Known9xYz"],
       ],
     ]);
     expect(rows[0]).toEqual({
       seller_email: "seller@example.com",
-      stripe_account_id: "acct_known",
-      ...expected,
+      stripe_account_id: "acct_1Known9xYz",
+      created_at: "2026-03-04T05:06:07.000Z",
+      ...flags,
     });
+  });
+
+  it("returns a zero listing count and a null connected_at when there is nothing to report", async () => {
+    const rows: Row[] = [
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_emptyAB12",
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: false,
+      },
+    ];
+    vi.mocked(getSupabaseAdmin).mockReturnValue(
+      fakeAdmin(rows) as unknown as ReturnType<typeof getSupabaseAdmin>,
+    );
+
+    const res = await GET(get("seller@example.com"));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status.account_hint).toBe("•••• AB12");
+    expect(body.status.connected_at).toBeNull();
+    expect(body.status.active_listings).toBe(0);
+  });
+
+  it("omits active_listings but still succeeds when the listings count fails", async () => {
+    const rows: Row[] = [
+      {
+        seller_email: "seller@example.com",
+        stripe_account_id: "acct_countFail",
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: false,
+      },
+    ];
+    vi.mocked(getSupabaseAdmin).mockReturnValue(
+      fakeAdmin(rows, [], [], { countError: true }) as unknown as ReturnType<
+        typeof getSupabaseAdmin
+      >,
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await GET(get("seller@example.com"));
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const body = JSON.parse(text);
+    expect(body.status).not.toHaveProperty("active_listings");
+    expect(body.status.account_hint).toBe("•••• Fail");
+    expect(text).not.toContain("acct_countFail");
+    expect(error).toHaveBeenCalledWith(
+      "stripe connect status failed:",
+      "active listings count:",
+      "listings down",
+    );
+    error.mockRestore();
   });
 
   it("unbinds the email and returns a null status when the account no longer exists", async () => {

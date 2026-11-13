@@ -275,6 +275,8 @@ describe("POST /api/stripe/connect/onboard", () => {
         charges_enabled: true,
         payouts_enabled: true,
         details_submitted: true,
+        account_hint: "•••• done",
+        connected_at: null,
       },
     });
     expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
@@ -382,7 +384,13 @@ describe("POST /api/stripe/connect/onboard", () => {
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(JSON.parse(text)).toEqual({
-      status: { charges_enabled: false, payouts_enabled: false, details_submitted: true },
+      status: {
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: true,
+        account_hint: "•••• shed",
+        connected_at: null,
+      },
     });
     expect(text).not.toContain("acct_finished");
     expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
@@ -477,7 +485,13 @@ describe("POST /api/stripe/connect/onboard", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      status: { charges_enabled: false, payouts_enabled: false, details_submitted: true },
+      status: {
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: true,
+        account_hint: "•••• sted",
+        connected_at: null,
+      },
     });
     expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
     expect(rows[0].details_submitted).toBe(true);
@@ -509,7 +523,13 @@ describe("POST /api/stripe/connect/onboard", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      status: { charges_enabled: false, payouts_enabled: false, details_submitted: true },
+      status: {
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: true,
+        account_hint: "•••• icky",
+        connected_at: null,
+      },
     });
     expect(stripe.v2.core.accountLinks.create).not.toHaveBeenCalled();
     expect(rows[0].details_submitted).toBe(true);
@@ -528,7 +548,13 @@ describe("POST /api/stripe/connect/onboard", () => {
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(JSON.parse(text)).toEqual({
-      status: { charges_enabled: false, payouts_enabled: false, details_submitted: true },
+      status: {
+        charges_enabled: false,
+        payouts_enabled: false,
+        details_submitted: true,
+        account_hint: "•••• _new",
+        connected_at: null,
+      },
     });
     expect(text).not.toContain("acct_new");
     expect(inserted).toEqual([

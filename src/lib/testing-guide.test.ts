@@ -18,7 +18,9 @@ describe("testing guide data", () => {
 
   it("has the exact Stripe onboarding test values to copy", () => {
     expect(copyFor(ONBOARDING_VALUES, "SMS code")).toBe("000000");
+    expect(copyFor(ONBOARDING_VALUES, "Date of birth")).toBe("01/01/1901");
     expect(copyFor(ONBOARDING_VALUES, "SSN")).toBe("000-00-0000");
+    expect(copyFor(ONBOARDING_VALUES, "Address line 1")).toBe("address_full_match");
     expect(copyFor(ONBOARDING_VALUES, "Routing number")).toBe("110000000");
     expect(copyFor(ONBOARDING_VALUES, "Account number")).toBe("000123456789");
   });
