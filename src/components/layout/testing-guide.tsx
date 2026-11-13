@@ -488,7 +488,7 @@ export function TestingGuideButton({
               role="tablist"
               aria-label="Testing guide sections"
               onKeyDown={handleTabKeyDown}
-              className="mt-4 flex gap-1 overflow-x-auto rounded-xl bg-gray-100 p-1"
+              className="mt-4 grid grid-cols-2 gap-1 rounded-xl bg-gray-100 p-1 sm:flex"
             >
               {TABS.map((tab) => {
                 const selected = tab.key === activeTab;
@@ -507,7 +507,7 @@ export function TestingGuideButton({
                     tabIndex={selected ? 0 : -1}
                     onClick={() => selectTab(tab.key, false)}
                     className={cn(
-                      "inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors sm:flex-1",
+                      "inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors sm:flex-1",
                       FOCUS_RING,
                       selected
                         ? "bg-white text-gray-900 shadow-sm"
