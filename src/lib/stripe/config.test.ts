@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PLATFORM_FEE_BPS,
   StripeConfigError,
   assertSandboxSecretKey,
+  readPlatformFeeBps,
   readStripeEnv,
 } from "@/lib/stripe/config";
 
@@ -69,9 +71,29 @@ describe("readStripeEnv", () => {
     expect(env).toMatchObject({
       secretKey: "sk_test_abc",
       webhookSecret: null,
-      platformFeeBps: 0,
+      platformFeeBps: 1000,
       appUrl: null,
     });
+  });
+
+  it("readPlatformFeeBps allows an explicit 0", () => {
+    expect(
+      readPlatformFeeBps({ PLATFORM_FEE_BPS: "0" } as unknown as NodeJS.ProcessEnv),
+    ).toBe(0);
+  });
+
+  it("readPlatformFeeBps defaults to 1000 and needs no secret key", () => {
+    const fee = readPlatformFeeBps({} as unknown as NodeJS.ProcessEnv);
+    expect(fee).toBe(1000);
+    expect(fee).toBe(DEFAULT_PLATFORM_FEE_BPS);
+  });
+
+  it("readPlatformFeeBps rejects invalid values", () => {
+    for (const value of ["abc", "10001", "-5", "2.5"]) {
+      expect(() =>
+        readPlatformFeeBps({ PLATFORM_FEE_BPS: value } as unknown as NodeJS.ProcessEnv),
+      ).toThrow(StripeConfigError);
+    }
   });
 
   it("normalizes APP_URL to its origin without a trailing slash", () => {
