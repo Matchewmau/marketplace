@@ -1,20 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import type { LucideIcon } from "lucide-react";
+import { MessageCircle, UserRound, Wallet } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
+// Icons are resolved here because component references cannot be passed as
+// props from Server Components to Client Components.
+const ICONS = {
+  messages: MessageCircle,
+  "get-paid": Wallet,
+  "your-listings": UserRound,
+} as const;
+
 export function HeaderNavLink({
   href,
   label,
-  icon: Icon,
+  icon,
 }: {
   href: string;
   label: string;
-  icon: LucideIcon;
+  icon: keyof typeof ICONS;
 }) {
+  const Icon = ICONS[icon];
   const pathname = usePathname();
   const active = pathname === href || pathname.startsWith(href + "/");
 

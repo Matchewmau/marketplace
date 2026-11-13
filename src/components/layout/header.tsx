@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { MessageCircle, UserRound, Wallet } from "lucide-react";
 
 import { FacebookLogo } from "@/components/layout/facebook-logo";
 import { HeaderNavLink } from "@/components/layout/header-nav-link";
@@ -21,9 +20,9 @@ export function Header() {
         </Link>
 
         <nav aria-label="Main" className="flex shrink-0 items-center gap-0.5">
-          <HeaderNavLink href="/messages" label="Messages" icon={MessageCircle} />
-          <HeaderNavLink href="/seller/payments" label="Get paid" icon={Wallet} />
-          <HeaderNavLink href="/your-listings" label="Your listings" icon={UserRound} />
+          <HeaderNavLink href="/messages" label="Messages" icon="messages" />
+          <HeaderNavLink href="/seller/payments" label="Get paid" icon="get-paid" />
+          <HeaderNavLink href="/your-listings" label="Your listings" icon="your-listings" />
           <TestingGuideButton />
         </nav>
       </div>
