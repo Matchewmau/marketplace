@@ -79,6 +79,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # Stripe (sandbox only)
 STRIPE_SECRET_KEY=sk_test_replace_me
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_replace_me
 PLATFORM_FEE_BPS=1000
 APP_URL=https://localhost:3000
@@ -91,14 +92,14 @@ either the legacy service-role key or the newer `sb_secret_...` key. Never
 prefix it with `NEXT_PUBLIC_`, never commit it, and keep `.env.local` out of
 git.
 
-Stripe variables (all server-only):
+Stripe variables:
 
 | Variable | Notes |
 | --- | --- |
 | `STRIPE_SECRET_KEY` | Sandbox secret or restricted key only (`sk_test_` or `rk_test_`). The server refuses anything else, including live keys. |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret (`whsec_…`) for the webhook endpoint. Required by `/api/stripe/webhook`. |
 | `PLATFORM_FEE_BPS` | Optional platform fee in basis points, `0`–`10000`. Defaults to `1000` (10%). `0` turns the fee off. The Get paid page shows the fee to sellers. |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Set as the assignment asks. Not used by the app, because Checkout is a hosted redirect. |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Public (browser-exposed) publishable key, `pk_test_…`. Unused by the app because Checkout is a hosted redirect. |
 | `APP_URL` | Origin used for Stripe onboarding return URLs and as the fallback for Checkout returns. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, set it to the production URL (recommended); if unset, the request origin is used. Checkout returns buyers to the origin they clicked Buy Now on when that origin is one of the app's known origins (the request origin, `APP_URL`, or the Vercel deployment URLs), otherwise to `APP_URL`. When self-hosting behind a proxy, set `APP_URL` to the public URL. |
 | `APP_SCOPE` | Optional unique id for this environment: a letter or digit first, then letters, digits, `.`, `_`, `:`, `-`, at most 100 characters. Lowercased and stored as `env:<value>`. Defaults to the Supabase project host. Required when `NEXT_PUBLIC_SUPABASE_URL` is a local Supabase (`localhost`, `127.0.0.1`, …) so environments sharing one Stripe sandbox never handle each other's checkouts; without it checkout is disabled. An invalid value disables checkout and makes the webhook return `503` until it is fixed. |
 
@@ -340,6 +341,26 @@ and that page posts the saved token to `/api/checkout/cancel` from the browser.
    The endpoint only handles sessions whose `app_scope` metadata matches
    production's app scope, so local `stripe listen` sessions on the same
    sandbox are ignored (and vice versa).
+
+   **Webhook setup (shared sandbox).** Instead of the Dashboard, run the
+   setup script yourself (it prints the signing secret, so run it only in your
+   own terminal):
+
+   ```bash
+   node --env-file=.env.local scripts/create-webhook.mjs            # create
+   node --env-file=.env.local scripts/create-webhook.mjs --dry-run  # plan only, creates nothing
+   ```
+
+   It registers the production URL with `connect: false`, because destination
+   charges create their events on the platform account, not on a connected
+   account. The three events are `checkout.session.completed`,
+   `checkout.session.async_payment_succeeded`, and `checkout.session.expired`.
+   Other candidates' endpoints in the shared sandbox may send you events
+   too; they get a 200 and are ignored because their `app_scope` metadata does
+   not match. The signing secret is shown once, at creation. If an endpoint with
+   this exact URL already exists the script exits; only `--replace` deletes
+   those endpoints (never others) and creates a fresh one. Then set
+   `STRIPE_WEBHOOK_SECRET` in Vercel (Production) and redeploy.
 5. Deploy. Pushing to `main` triggers a new production deployment.
 6. Smoke-test the deployment: browse and search, create a listing with a photo,
    send a message, then read it in `/messages` using that listing’s seller
