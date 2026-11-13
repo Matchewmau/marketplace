@@ -1,3 +1,7 @@
+"use client";
+
+import { useId, useState } from "react";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -38,9 +42,46 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
         filters.location,
     ) || filters.sort !== "newest";
 
+  const activeCount =
+    [
+      filters.minPrice,
+      filters.maxPrice,
+      filters.condition,
+      filters.location,
+    ].filter(Boolean).length + (filters.sort !== "newest" ? 1 : 0);
+
+  const fieldsId = useId();
+  const [expanded, setExpanded] = useState(activeCount > 0);
+
   return (
     <div className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-black/[0.03]">
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={fieldsId}
+        onClick={() => setExpanded((open) => !open)}
+        className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-sm font-semibold text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40 sm:hidden"
+      >
+        <SlidersHorizontal className="size-4" aria-hidden="true" />
+        Filters
+        {activeCount > 0 && (
+          <span className="rounded-full bg-[#E7F3FF] px-2 py-0.5 text-xs font-semibold text-[#1877F2]">
+            {activeCount}
+          </span>
+        )}
+        <ChevronDown
+          aria-hidden="true"
+          className={`ml-auto size-4 motion-safe:transition-transform ${
+            expanded ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      <div
+        id={fieldsId}
+        className={`${
+          expanded ? "mt-3 flex" : "hidden"
+        } flex-col gap-3 sm:mt-0 sm:flex sm:flex-row sm:flex-wrap sm:items-end`}
+      >
         <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 sm:w-28">
           Min price
           <Input
