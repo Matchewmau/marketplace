@@ -14,15 +14,32 @@ const APP_SCOPE = "xyz.supabase.co";
 
 type RpcCall = { name: string; args: Record<string, unknown> };
 
-function fakeAdmin(rpcError: string | null = null) {
+const REGISTRY = { listing_id: LISTING_ID, hold_token: HOLD_TOKEN };
+
+function fakeAdmin(
+  rpcError: string | null = null,
+  registry: { listing_id: string; hold_token: string } | null = REGISTRY,
+) {
   const rpcCalls: RpcCall[] = [];
+  const registryQueries: unknown[] = [];
   const admin = {
+    from(table: string) {
+      const builder = {
+        select: () => builder,
+        eq: (column: string, value: unknown) => {
+          registryQueries.push({ table, column, value });
+          return builder;
+        },
+        maybeSingle: async () => ({ data: registry, error: null }),
+      };
+      return builder;
+    },
     async rpc(name: string, args: Record<string, unknown>) {
       rpcCalls.push({ name, args });
       return { data: null, error: rpcError ? { message: rpcError } : null };
     },
   };
-  return { admin: admin as unknown as SupabaseClient, rpcCalls };
+  return { admin: admin as unknown as SupabaseClient, rpcCalls, registryQueries };
 }
 
 function event(type: string, object: Record<string, unknown>): Stripe.Event {
@@ -68,16 +85,23 @@ describe("handleStripeEvent", () => {
     expect(fulfillCheckoutSession).toHaveBeenCalledWith("cs_test_2", { stripe, admin });
   });
 
-  it("releases the hold named in the expired session metadata", async () => {
-    const { admin, rpcCalls } = fakeAdmin();
+  it("releases the hold named in the registry, not in the session metadata", async () => {
+    const { admin, rpcCalls, registryQueries } = fakeAdmin();
     const outcome = await handleStripeEvent(
       event("checkout.session.expired", {
         id: "cs_test_3",
-        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
+        metadata: {
+          listing_id: "33333333-3333-4333-8333-333333333333",
+          hold_token: "44444444-4444-4444-8444-444444444444",
+          app_scope: APP_SCOPE,
+        },
       }),
       { stripe, admin },
     );
     expect(outcome).toBe("released");
+    expect(registryQueries).toEqual([
+      { table: "checkout_sessions", column: "stripe_checkout_session_id", value: "cs_test_3" },
+    ]);
     expect(rpcCalls).toEqual([
       {
         name: "release_listing_hold",
@@ -85,6 +109,19 @@ describe("handleStripeEvent", () => {
       },
     ]);
     expect(fulfillCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("ignores an expired session that is not in the registry", async () => {
+    const { admin, rpcCalls } = fakeAdmin(null, null);
+    const outcome = await handleStripeEvent(
+      event("checkout.session.expired", {
+        id: "cs_forged",
+        metadata: { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
+      }),
+      { stripe, admin },
+    );
+    expect(outcome).toBe("ignored");
+    expect(rpcCalls).toEqual([]);
   });
 
   it("ignores unknown event types", async () => {
@@ -157,9 +194,6 @@ describe("handleStripeEvent", () => {
 
   it.each([
     ["no metadata", undefined],
-    ["a non-uuid listing_id", { listing_id: "abc", hold_token: HOLD_TOKEN, app_scope: APP_SCOPE }],
-    ["a non-uuid hold_token", { listing_id: LISTING_ID, hold_token: "h", app_scope: APP_SCOPE }],
-    ["a missing hold_token", { listing_id: LISTING_ID, app_scope: APP_SCOPE }],
     ["a missing app_scope", { listing_id: LISTING_ID, hold_token: HOLD_TOKEN }],
     [
       "another deployment's app_scope",

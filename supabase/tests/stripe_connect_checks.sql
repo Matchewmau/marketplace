@@ -1,6 +1,7 @@
 -- Stripe Connect SQL checks.
 -- Paste into the Supabase SQL editor AFTER applying
--- supabase/migrations/20261112000000_stripe_connect.sql.
+-- supabase/migrations/20261112000000_stripe_connect.sql and
+-- supabase/migrations/20261114000000_checkout_session_registry.sql.
 -- Everything runs inside a transaction that is rolled back, so no data is left behind.
 -- Success: the final result set shows "ALL CHECKS PASSED" (the SQL editor only displays the
 -- last statement's result; any failed check raises and aborts the batch before it).
@@ -32,6 +33,10 @@ begin
   insert into public.listings (title, price, category, seller_email)
   values ('Stripe check listing', 25.00, 'Test', 'seller@example.com')
   returning id into v_listing_id;
+
+  insert into public.listings (title, price, category, seller_email)
+  values ('Stripe check listing 2', 10.00, 'Test', 'Mixed.Case@Example.com')
+  returning id into v_listing2_id;
 
   -- Constraint: a sold listing must have sold_at (and vice versa), even for the owner.
   begin
@@ -101,6 +106,46 @@ begin
     raise exception 'CHECK FAILED: attach_hold_session with matching token should set session, got %', v_session;
   end if;
 
+  -- record_paid_order only accepts sessions registered by this app, with matching values.
+  v_result := public.record_paid_order('cs_test_1', 'pi_test_1', v_listing_id, 'buyer@example.com', 2500, 125, 'acct_test_1');
+  if v_result is distinct from 'unrecognized' then
+    raise exception 'CHECK FAILED: record_paid_order without a registry row should return unrecognized, got %', v_result;
+  end if;
+
+  insert into public.checkout_sessions (
+    stripe_checkout_session_id, listing_id, hold_token, amount_cents, seller_stripe_account_id, application_fee_cents
+  ) values ('cs_test_1', v_listing_id, v_token_b, 2500, 'acct_test_1', 125);
+
+  v_result := public.record_paid_order('cs_test_1', 'pi_test_1', v_listing_id, 'buyer@example.com', 2400, 125, 'acct_test_1');
+  if v_result is distinct from 'unrecognized' then
+    raise exception 'CHECK FAILED: amount mismatch should return unrecognized, got %', v_result;
+  end if;
+  v_result := public.record_paid_order('cs_test_1', 'pi_test_1', v_listing_id, 'buyer@example.com', 2500, 125, 'acct_attacker');
+  if v_result is distinct from 'unrecognized' then
+    raise exception 'CHECK FAILED: seller mismatch should return unrecognized, got %', v_result;
+  end if;
+  v_result := public.record_paid_order('cs_test_1', 'pi_test_1', v_listing_id, 'buyer@example.com', 2500, 0, 'acct_test_1');
+  if v_result is distinct from 'unrecognized' then
+    raise exception 'CHECK FAILED: fee mismatch should return unrecognized, got %', v_result;
+  end if;
+  v_result := public.record_paid_order('cs_test_1', 'pi_test_1', v_listing2_id, 'buyer@example.com', 2500, 125, 'acct_test_1');
+  if v_result is distinct from 'unrecognized' then
+    raise exception 'CHECK FAILED: listing mismatch should return unrecognized, got %', v_result;
+  end if;
+
+  select status into v_status from public.listings where id = v_listing_id;
+  if v_status is distinct from 'active' then
+    raise exception 'CHECK FAILED: listing must stay active after unrecognized sessions, got %', v_status;
+  end if;
+  select count(*) into v_count from public.orders where listing_id = v_listing_id;
+  if v_count <> 0 then
+    raise exception 'CHECK FAILED: unrecognized sessions must not create orders, found %', v_count;
+  end if;
+  select count(*) into v_count from public.listing_holds where listing_id = v_listing_id;
+  if v_count <> 1 then
+    raise exception 'CHECK FAILED: unrecognized sessions must not release the hold, found %', v_count;
+  end if;
+
   -- First payment records the order and marks the listing sold.
   v_result := public.record_paid_order('cs_test_1', 'pi_test_1', v_listing_id, 'buyer@example.com', 2500, 125, 'acct_test_1');
   if v_result is distinct from 'recorded' then
@@ -148,6 +193,9 @@ begin
   end if;
 
   -- Second buyer for an already-sold listing needs a refund.
+  insert into public.checkout_sessions (
+    stripe_checkout_session_id, listing_id, hold_token, amount_cents, seller_stripe_account_id, application_fee_cents
+  ) values ('cs_test_2', v_listing_id, gen_random_uuid(), 2500, 'acct_test_1', 125);
   v_result := public.record_paid_order('cs_test_2', 'pi_test_2', v_listing_id, 'late@example.com', 2500, 125, 'acct_test_1');
   if v_result is distinct from 'refund_pending' then
     raise exception 'CHECK FAILED: record_paid_order on sold listing should return refund_pending, got %', v_result;
@@ -181,11 +229,9 @@ begin
   end if;
 
   -- NULL fee records 0; seller email is stored lower-cased.
-  reset role;
-  insert into public.listings (title, price, category, seller_email)
-  values ('Stripe check listing 2', 10.00, 'Test', 'Mixed.Case@Example.com')
-  returning id into v_listing2_id;
-  set local role service_role;
+  insert into public.checkout_sessions (
+    stripe_checkout_session_id, listing_id, hold_token, amount_cents, seller_stripe_account_id
+  ) values ('cs_test_3', v_listing2_id, gen_random_uuid(), 1000, 'acct_test_2');
 
   v_result := public.record_paid_order('cs_test_3', 'pi_test_3', v_listing2_id, 'buyer@example.com', 1000, null, 'acct_test_2');
   if v_result is distinct from 'recorded' then
@@ -223,7 +269,7 @@ begin
       end if;
     end loop;
 
-    foreach v_tbl in array array['public.seller_accounts', 'public.listing_holds', 'public.orders'] loop
+    foreach v_tbl in array array['public.seller_accounts', 'public.listing_holds', 'public.orders', 'public.checkout_sessions'] loop
       foreach v_priv in array array['select', 'insert', 'update', 'delete'] loop
         if has_table_privilege(v_role, v_tbl, v_priv) then
           raise exception 'CHECK FAILED: % must not % on %', v_role, v_priv, v_tbl;
@@ -248,7 +294,7 @@ begin
     raise exception 'CHECK FAILED: service_role must select on public.messages';
   end if;
 
-  foreach v_tbl in array array['public.seller_accounts', 'public.listing_holds', 'public.orders'] loop
+  foreach v_tbl in array array['public.seller_accounts', 'public.listing_holds', 'public.orders', 'public.checkout_sessions'] loop
     foreach v_priv in array array['select', 'insert', 'update', 'delete'] loop
       if not has_table_privilege('service_role', v_tbl, v_priv) then
         raise exception 'CHECK FAILED: service_role must % on %', v_priv, v_tbl;
@@ -261,7 +307,7 @@ begin
   end loop;
 
   select count(*) into v_count from pg_policies
-   where schemaname = 'public' and tablename in ('seller_accounts', 'listing_holds', 'orders');
+   where schemaname = 'public' and tablename in ('seller_accounts', 'listing_holds', 'orders', 'checkout_sessions');
   if v_count <> 0 then
     raise exception 'CHECK FAILED: new tables must have no RLS policies, found %', v_count;
   end if;

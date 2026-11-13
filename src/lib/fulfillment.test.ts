@@ -10,26 +10,47 @@ const HOLD_TOKEN = "22222222-2222-4222-8222-222222222222";
 const SESSION_ID = "cs_test_paid";
 const APP_SCOPE = "xyz.supabase.co";
 
+type RegistryRow = {
+  listing_id: string;
+  amount_cents: number;
+  seller_stripe_account_id: string;
+  application_fee_cents: number;
+};
+
+const REGISTRY: RegistryRow = {
+  listing_id: LISTING_ID,
+  amount_cents: 1999,
+  seller_stripe_account_id: "acct_seller_1",
+  application_fee_cents: 99,
+};
+
 type RpcCall = { name: string; args: Record<string, unknown> };
 
 function fakeAdmin(
   recordResults: string[],
-  opts: { listingExists?: boolean; markError?: string } = {},
+  opts: { listingExists?: boolean; markError?: string; registry?: RegistryRow | null } = {},
 ) {
   const rpcCalls: RpcCall[] = [];
   const listingQueries: unknown[] = [];
+  const registryQueries: unknown[] = [];
   const admin = {
     from(table: string) {
       const builder = {
         select: () => builder,
         eq: (column: string, value: unknown) => {
-          listingQueries.push({ table, column, value });
+          (table === "checkout_sessions" ? registryQueries : listingQueries).push({
+            table,
+            column,
+            value,
+          });
           return builder;
         },
-        maybeSingle: async () => ({
-          data: opts.listingExists === false ? null : { id: LISTING_ID },
-          error: null,
-        }),
+        maybeSingle: async () => {
+          if (table === "checkout_sessions") {
+            return { data: opts.registry === undefined ? REGISTRY : opts.registry, error: null };
+          }
+          return { data: opts.listingExists === false ? null : { id: LISTING_ID }, error: null };
+        },
       };
       return builder;
     },
@@ -44,7 +65,7 @@ function fakeAdmin(
       return { data: null, error: null };
     },
   };
-  return { admin: admin as unknown as SupabaseClient, rpcCalls, listingQueries };
+  return { admin: admin as unknown as SupabaseClient, rpcCalls, listingQueries, registryQueries };
 }
 
 const retrieve = vi.fn();
@@ -185,7 +206,9 @@ describe("fulfillCheckoutSession", () => {
 
   it("omits refund_application_fee when there was no platform fee", async () => {
     retrieve.mockResolvedValue(session({ fee: null }));
-    const { admin } = fakeAdmin(["refund_pending"]);
+    const { admin } = fakeAdmin(["refund_pending"], {
+      registry: { ...REGISTRY, application_fee_cents: 0 },
+    });
     await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
     expect(refundCreate.mock.calls[0][0]).toEqual({
       payment_intent: "pi_test_1",
@@ -195,31 +218,84 @@ describe("fulfillCheckoutSession", () => {
 
   it.each([
     ["no metadata", null],
-    ["a non-uuid listing_id", { listing_id: "abc", hold_token: HOLD_TOKEN, app_scope: APP_SCOPE }],
-    ["a missing hold_token", { listing_id: LISTING_ID, app_scope: APP_SCOPE }],
-    ["a non-uuid hold_token", { listing_id: LISTING_ID, hold_token: "h", app_scope: APP_SCOPE }],
-    [
-      "a missing app_scope",
-      { listing_id: LISTING_ID, hold_token: HOLD_TOKEN, seller_account_id: "acct_seller_1" },
-    ],
+    ["a missing app_scope", { listing_id: LISTING_ID, seller_account_id: "acct_seller_1" }],
     [
       "another deployment's app_scope",
-      {
-        listing_id: LISTING_ID,
-        hold_token: HOLD_TOKEN,
-        seller_account_id: "acct_seller_1",
-        app_scope: "other.supabase.co",
-      },
+      { listing_id: LISTING_ID, seller_account_id: "acct_seller_1", app_scope: "other.supabase.co" },
     ],
   ])("ignores a paid session with %s", async (_label, metadata) => {
     retrieve.mockResolvedValue(session({ metadata }));
-    const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"]);
+    const { admin, rpcCalls, listingQueries, registryQueries } = fakeAdmin(["recorded"]);
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result.outcome).toBe("ignored");
+    expect(rpcCalls).toEqual([]);
+    expect(listingQueries).toEqual([]);
+    expect(registryQueries).toEqual([]);
+    expect(refundCreate).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a forged paid session that is not in the registry, without refunding", async () => {
+    const { admin, rpcCalls, listingQueries, registryQueries } = fakeAdmin(["recorded"], {
+      registry: null,
+    });
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result).toEqual({ outcome: "ignored", listingId: null, amountCents: 1999 });
+    expect(registryQueries).toEqual([
+      { table: "checkout_sessions", column: "stripe_checkout_session_id", value: SESSION_ID },
+    ]);
+    expect(listingQueries).toEqual([]);
+    expect(rpcCalls).toEqual([]);
+    expect(refundCreate).not.toHaveBeenCalled();
+  });
+
+  it("uses the registry listing, not the metadata listing", async () => {
+    const forged = "33333333-3333-4333-8333-333333333333";
+    retrieve.mockResolvedValue(
+      session({
+        metadata: { listing_id: forged, hold_token: HOLD_TOKEN, app_scope: APP_SCOPE },
+      }),
+    );
+    const { admin, rpcCalls } = fakeAdmin(["recorded"]);
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result.listingId).toBe(LISTING_ID);
+    expect(rpcCalls[0].args).toMatchObject({
+      p_listing_id: LISTING_ID,
+      p_amount_cents: 1999,
+      p_fee_cents: 99,
+      p_seller_account_id: "acct_seller_1",
+    });
+  });
+
+  it.each([
+    ["amount", { ...REGISTRY, amount_cents: 2500 }],
+    ["destination", { ...REGISTRY, seller_stripe_account_id: "acct_other" }],
+    ["fee", { ...REGISTRY, application_fee_cents: 0 }],
+  ])("ignores a registered session whose %s does not match", async (_label, registry) => {
+    const { admin, rpcCalls, listingQueries } = fakeAdmin(["recorded"], { registry });
     const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
     expect(result.outcome).toBe("ignored");
     expect(rpcCalls).toEqual([]);
     expect(listingQueries).toEqual([]);
     expect(refundCreate).not.toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a missing platform fee as 0 when comparing with the registry", async () => {
+    retrieve.mockResolvedValue(session({ fee: null }));
+    const { admin } = fakeAdmin(["recorded"], {
+      registry: { ...REGISTRY, application_fee_cents: 0 },
+    });
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result.outcome).toBe("recorded");
+  });
+
+  it("maps an unrecognized record_paid_order result to ignored without refunding", async () => {
+    const { admin, rpcCalls } = fakeAdmin(["unrecognized"]);
+    const result = await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
+    expect(result.outcome).toBe("ignored");
+    expect(rpcCalls.map((c) => c.name)).toEqual(["record_paid_order"]);
+    expect(refundCreate).not.toHaveBeenCalled();
   });
 
   it("ignores another deployment's session even when its listing is missing here", async () => {
@@ -293,7 +369,10 @@ describe("fulfillCheckoutSession", () => {
 
   it("omits refund_application_fee for a deleted listing without a platform fee", async () => {
     retrieve.mockResolvedValue(session({ fee: 0 }));
-    const { admin } = fakeAdmin([], { listingExists: false });
+    const { admin } = fakeAdmin([], {
+      listingExists: false,
+      registry: { ...REGISTRY, application_fee_cents: 0 },
+    });
     await fulfillCheckoutSession(SESSION_ID, { stripe: fakeStripe(), admin });
     expect(refundCreate.mock.calls[0][0]).toEqual({
       payment_intent: "pi_test_1",

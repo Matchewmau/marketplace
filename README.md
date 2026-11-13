@@ -114,6 +114,7 @@ In the Supabase Dashboard, open the SQL editor and run, in order:
 1. `supabase/migrations/20261109000000_init_marketplace.sql`
 2. `supabase/seed.sql`
 3. `supabase/migrations/20261112000000_stripe_connect.sql`
+4. `supabase/migrations/20261114000000_checkout_session_registry.sql`
 
 The migration creates:
 
@@ -130,7 +131,9 @@ the Get paid page. The seed is optional; the app works with an empty database.
 
 The Stripe Connect migration adds listing status, the `seller_accounts`,
 `listing_holds` and `orders` tables, and the SQL functions used by checkout (see
-[Database schema](#database-schema)).
+[Database schema](#database-schema)). The registry migration adds the
+`checkout_sessions` table and makes `record_paid_order` accept only registered
+sessions.
 
 To check the migration, paste `supabase/tests/stripe_connect_checks.sql` into
 the SQL editor. It should return `ALL CHECKS PASSED` and leaves no data behind.
@@ -268,7 +271,7 @@ key (the Stripe Connect migration grants `select` on `messages` to
 
 ### Stripe tables
 
-`seller_accounts`, `listing_holds` and `orders` have row-level security enabled
+`seller_accounts`, `listing_holds`, `orders` and `checkout_sessions` have row-level security enabled
 with no policies, and access is revoked from `anon` and `authenticated`. Only
 the service-role key can read or write them.
 
@@ -286,6 +289,12 @@ cascade delete), `hold_token`, `checkout_session_id`, `checkout_url`,
 `application_fee_cents`, `currency` (default `usd`), `status` (`paid`,
 `refund_pending`, `refunded`), `created_at`, `updated_at`. A partial unique
 index allows only one `paid` order per listing.
+
+**`public.checkout_sessions`**: the registry of Checkout Sessions this app
+created: `stripe_checkout_session_id` (primary key), `listing_id` (no foreign
+key, so it survives listing deletion), `hold_token`, `amount_cents` (`>= 50`),
+`currency`, `seller_stripe_account_id`, `application_fee_cents`, `created_at`.
+Fulfilment and hold release trust these rows, never Stripe metadata.
 
 ### SQL functions
 
@@ -366,7 +375,9 @@ and that page posts the saved token to `/api/checkout/cancel` from the browser.
    `checkout.session.async_payment_succeeded`, and `checkout.session.expired`.
    Other candidates' endpoints in the shared sandbox may send you events
    too; they get a 200 and are ignored because their `app_scope` metadata does
-   not match. The signing secret is shown once, at creation. If an endpoint with
+   not match. Only sessions this app created and registered in
+   `checkout_sessions` are fulfilled, so forged sessions made with the shared key
+   are ignored. The signing secret is shown once, at creation. If an endpoint with
    this exact URL already exists the script exits; only `--replace` deletes
    those endpoints (never others) and creates a fresh one. Then set
    `STRIPE_WEBHOOK_SECRET` in Vercel (Production) and redeploy.
@@ -383,8 +394,8 @@ npm test          # Vitest, once
 npm run check     # tsc --noEmit, eslint, and the tests
 ```
 
-`supabase/tests/stripe-connect.sql.test.ts` runs the Stripe Connect migration
-and `supabase/tests/stripe_connect_checks.sql` against an in-memory Postgres
+`supabase/tests/stripe-connect.sql.test.ts` runs the Stripe Connect and checkout session registry
+migrations and `supabase/tests/stripe_connect_checks.sql` against an in-memory Postgres
 (PGlite), including a mode without Supabase's automatic grants. The CI workflow
 (`.github/workflows/ci.yml`) runs `npm ci`, `npm run build`, and `npm run check`
 on every push and pull request with read-only repository permissions.

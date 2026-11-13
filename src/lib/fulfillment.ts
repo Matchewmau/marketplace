@@ -19,6 +19,13 @@ export type FulfillResult = {
 
 const LOG_PREFIX = "fulfillment:";
 
+type RegistryRow = {
+  listing_id: string;
+  amount_cents: number;
+  seller_stripe_account_id: string;
+  application_fee_cents: number;
+};
+
 /**
  * Refunds the PaymentIntent (reversing the transfer, and the platform fee if any) and returns the
  * refund id. A refund already made by hand in the Dashboard is reused. Throws unless the refund
@@ -61,7 +68,7 @@ async function refundPayment(
  * Records a paid Checkout Session as an order. Idempotent: a repeat call returns "duplicate",
  * and a session that lost the race for the listing is refunded (retried until marked refunded).
  * A paid session for a deleted listing is refunded as "refunded_unavailable". Sessions created by
- * another deployment (different app_scope) or without this app's metadata are ignored.
+ * another deployment (different app_scope) or not registered by this app are ignored.
  * Throws AppScopeUnavailableError, before touching Stripe or the database, when this deployment
  * has no app scope, so callers retry instead of dropping a paid session.
  */
@@ -88,20 +95,32 @@ export async function fulfillCheckoutSession(
   }
 
   const metadataListingId = session.metadata?.listing_id ?? null;
-  const listingId = metadataListingId && isUuid(metadataListingId) ? metadataListingId : null;
-  const holdToken = session.metadata?.hold_token ?? null;
+  const metadataListing =
+    metadataListingId && isUuid(metadataListingId) ? metadataListingId : null;
 
   if (session.payment_status !== "paid") {
-    return { outcome: "not_paid", listingId, amountCents: session.amount_total };
+    return { outcome: "not_paid", listingId: metadataListing, amountCents: session.amount_total };
   }
 
-  if (!listingId || !holdToken || !isUuid(holdToken)) {
-    // Another Checkout integration on the same account (e.g. Payment Links); not ours.
-    console.warn(LOG_PREFIX, "ignoring paid session without listing metadata", {
+  // Stripe metadata is never trusted (the sandbox key is shared): only sessions this app created
+  // and registered are fulfilled, using the registered values. Unregistered sessions are never
+  // refunded either, since they are not ours.
+  const { data: registered, error: registryError } = await admin
+    .from("checkout_sessions")
+    .select("listing_id, amount_cents, seller_stripe_account_id, application_fee_cents")
+    .eq("stripe_checkout_session_id", session.id)
+    .maybeSingle();
+  if (registryError) {
+    throw new Error(`Failed to load checkout session registry: ${registryError.message}`);
+  }
+  const registry = registered as RegistryRow | null;
+  if (!registry) {
+    console.warn(LOG_PREFIX, "ignoring paid session not created by this app", {
       sessionId: session.id,
     });
     return { outcome: "ignored", listingId: null, amountCents: session.amount_total };
   }
+  const listingId = registry.listing_id;
 
   const pi = session.payment_intent;
   if (!pi || typeof pi === "string") {
@@ -116,10 +135,17 @@ export async function fulfillCheckoutSession(
   const fee = pi.application_fee_amount ?? 0;
   const destination = pi.transfer_data?.destination;
   const destinationId = typeof destination === "string" ? destination : destination?.id;
-  const sellerAccount = session.metadata?.seller_account_id ?? destinationId;
-  if (!sellerAccount) {
-    throw new Error("Checkout session has no seller account.");
+  if (
+    amountCents !== registry.amount_cents ||
+    destinationId !== registry.seller_stripe_account_id ||
+    fee !== registry.application_fee_cents
+  ) {
+    console.warn(LOG_PREFIX, "ignoring session that does not match its registration", {
+      sessionId: session.id,
+    });
+    return { outcome: "ignored", listingId: null, amountCents };
   }
+  const sellerAccount = registry.seller_stripe_account_id;
 
   const { data: listingRow, error: listingError } = await admin
     .from("listings")
@@ -150,6 +176,13 @@ export async function fulfillCheckoutSession(
   });
   if (error) {
     throw new Error(`Failed to record order: ${error.message}`);
+  }
+
+  if (data === "unrecognized") {
+    console.warn(LOG_PREFIX, "record_paid_order did not recognise the session", {
+      sessionId: session.id,
+    });
+    return { outcome: "ignored", listingId: null, amountCents };
   }
 
   if (data === "recorded" || data === "duplicate" || data === "refunded") {

@@ -30,8 +30,10 @@ function fakeAdmin(
   tables: Record<string, Row[]>,
   rpcResults: Record<string, unknown> = {},
   rpcErrors: Record<string, string> = {},
+  insertError: { code?: string; message: string } | null = null,
 ) {
   const rpcCalls: RpcCall[] = [];
+  const inserts: Array<{ table: string; row: Row }> = [];
 
   function query(table: string, columns: string) {
     const filters: Array<(row: Row) => boolean> = [];
@@ -60,6 +62,10 @@ function fakeAdmin(
     from(table: string) {
       return {
         select: (columns: string) => query(table, columns),
+        insert: async (row: Row) => {
+          inserts.push({ table, row });
+          return { error: insertError };
+        },
         update: (patch: Row) => {
           const filters: Array<(row: Row) => boolean> = [];
           const builder = {
@@ -86,7 +92,7 @@ function fakeAdmin(
       return { data: name in rpcResults ? rpcResults[name] : null, error: null };
     },
   };
-  return { admin: admin as unknown as SupabaseClient, rpcCalls };
+  return { admin: admin as unknown as SupabaseClient, rpcCalls, inserts };
 }
 
 function listing(overrides: Row = {}): Row {
@@ -164,6 +170,7 @@ function setup(
     holds?: Row[];
     reserve?: boolean;
     rpcErrors?: Record<string, string>;
+    insertError?: { code?: string; message: string };
   } = {},
 ) {
   return fakeAdmin(
@@ -174,6 +181,7 @@ function setup(
     },
     { reserve_listing: opts.reserve ?? true },
     opts.rpcErrors,
+    opts.insertError ?? null,
   );
 }
 
@@ -215,12 +223,26 @@ describe("createCheckoutForListing", () => {
   });
 
   it("charges the DB price in cents and creates a session with a fresh hold", async () => {
-    const { admin, rpcCalls } = setup();
+    const { admin, rpcCalls, inserts } = setup();
     const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.url).toBe("https://checkout.stripe.com/c/pay/cs_test_new");
+    expect(inserts).toEqual([
+      {
+        table: "checkout_sessions",
+        row: {
+          stripe_checkout_session_id: "cs_test_new",
+          listing_id: LISTING_ID,
+          hold_token: result.holdToken,
+          amount_cents: 1999,
+          currency: "usd",
+          seller_stripe_account_id: ACCOUNT,
+          application_fee_cents: 0,
+        },
+      },
+    ]);
     const [params, options] = create.mock.calls[0];
     expect(params.line_items[0].price_data.unit_amount).toBe(1999);
     expect(params.line_items[0].price_data.product_data).toEqual({
@@ -234,11 +256,12 @@ describe("createCheckoutForListing", () => {
     );
     const metadata = {
       listing_id: LISTING_ID,
-      hold_token: result.holdToken,
       seller_account_id: ACCOUNT,
       app_scope: APP_SCOPE,
     };
     expect(params.metadata).toEqual(metadata);
+    expect(params.metadata).not.toHaveProperty("hold_token");
+    expect(params.payment_intent_data.metadata).not.toHaveProperty("hold_token");
     expect(params.payment_intent_data.metadata).toEqual(metadata);
     expect(params.cancel_url).toBe(`${ORIGIN}/checkout/cancel?listing=${LISTING_ID}`);
     expect(params.cancel_url).not.toContain(result.holdToken);
@@ -431,6 +454,45 @@ describe("createCheckoutForListing", () => {
       p_listing_id: LISTING_ID,
       p_hold_token: reserve?.args.p_hold_token,
     });
+  });
+
+  it("expires the session, releases the hold and returns 500 when registering fails", async () => {
+    const { admin, rpcCalls } = setup({
+      insertError: { code: "XX000", message: "db down sk_test_secret123" },
+    });
+    const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
+    expect(result).toEqual({
+      ok: false,
+      status: 500,
+      error: "Could not start checkout. Try again.",
+    });
+    expect(expire).toHaveBeenCalledWith("cs_test_new");
+    const reserve = rpcCalls.find((c) => c.name === "reserve_listing");
+    // The session is never attached to the hold or handed out.
+    expect(rpcCalls.map((c) => c.name)).toEqual(["reserve_listing", "release_listing_hold"]);
+    expect(rpcCalls[1].args).toEqual({
+      p_listing_id: LISTING_ID,
+      p_hold_token: reserve?.args.p_hold_token,
+    });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("sk_test_secret123");
+  });
+
+  it("still releases the hold when expiring after a failed registration throws", async () => {
+    expire.mockRejectedValue(new Error("stripe down"));
+    const { admin, rpcCalls } = setup({ insertError: { code: "XX000", message: "db down" } });
+    const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
+    expect(result).toMatchObject({ ok: false, status: 500 });
+    expect(rpcCalls.map((c) => c.name)).toEqual(["reserve_listing", "release_listing_hold"]);
+  });
+
+  it("treats a duplicate registry row (idempotent replay) as success", async () => {
+    const { admin, rpcCalls } = setup({
+      insertError: { code: "23505", message: "duplicate key value" },
+    });
+    const result = await createCheckoutForListing(LISTING_ID, ORIGIN, deps(admin));
+    expect(result.ok).toBe(true);
+    expect(expire).not.toHaveBeenCalled();
+    expect(rpcCalls.map((c) => c.name)).toEqual(["reserve_listing", "attach_hold_session"]);
   });
 
   it("keeps the hold when expiring after a failed attach throws", async () => {

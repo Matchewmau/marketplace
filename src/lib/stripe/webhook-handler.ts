@@ -3,7 +3,6 @@ import type Stripe from "stripe";
 
 import { fulfillCheckoutSession } from "@/lib/fulfillment";
 import { AppScopeUnavailableError, getAppScope } from "@/lib/stripe/app-scope";
-import { isUuid } from "@/lib/validation";
 
 export type WebhookOutcome = "fulfilled" | "released" | "ignored";
 
@@ -28,14 +27,22 @@ export async function handleStripeEvent(
         // Another deployment sharing this Stripe sandbox owns this session.
         return "ignored";
       }
-      const listingId = event.data.object.metadata?.listing_id;
-      const holdToken = event.data.object.metadata?.hold_token;
-      if (!listingId || !holdToken || !isUuid(listingId) || !isUuid(holdToken)) {
+      // Release using our own registry row, never the (forgeable) session metadata.
+      const { data: registered, error: registryError } = await deps.admin
+        .from("checkout_sessions")
+        .select("listing_id, hold_token")
+        .eq("stripe_checkout_session_id", event.data.object.id)
+        .maybeSingle();
+      if (registryError) {
+        throw new Error(`Failed to load checkout session registry: ${registryError.message}`);
+      }
+      const registry = registered as { listing_id: string; hold_token: string } | null;
+      if (!registry) {
         return "ignored";
       }
       const { error } = await deps.admin.rpc("release_listing_hold", {
-        p_listing_id: listingId,
-        p_hold_token: holdToken,
+        p_listing_id: registry.listing_id,
+        p_hold_token: registry.hold_token,
       });
       if (error) {
         throw new Error(`Failed to release hold: ${error.message}`);

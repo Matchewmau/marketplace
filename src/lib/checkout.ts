@@ -237,14 +237,12 @@ export async function createCheckoutForListing(
           ...(fee > 0 ? { application_fee_amount: fee } : {}),
           metadata: {
             listing_id: listing.id,
-            hold_token: hold,
             seller_account_id: seller.stripe_account_id,
             app_scope: appScope,
           },
         },
         metadata: {
           listing_id: listing.id,
-          hold_token: hold,
           seller_account_id: seller.stripe_account_id,
           app_scope: appScope,
         },
@@ -265,6 +263,28 @@ export async function createCheckoutForListing(
     console.error(LOG_PREFIX, "checkout session has no url");
     await releaseHold(admin, listing.id, hold);
     return { ok: false, status: 502, error: START_ERROR };
+  }
+
+  // Register the session before anything can fulfil it: Stripe metadata is never trusted.
+  // An idempotent replay may return an already-registered session (duplicate key).
+  const { error: registryError } = await admin.from("checkout_sessions").insert({
+    stripe_checkout_session_id: session.id,
+    listing_id: listing.id,
+    hold_token: hold,
+    amount_cents: state.amountCents,
+    currency: "usd",
+    seller_stripe_account_id: seller.stripe_account_id,
+    application_fee_cents: fee,
+  });
+  if (registryError && registryError.code !== "23505") {
+    console.error(LOG_PREFIX, "register checkout session", safeErrorMessage(registryError.message));
+    try {
+      await stripe.checkout.sessions.expire(session.id);
+    } catch (err) {
+      console.error(LOG_PREFIX, "expire session", safeErrorMessage(err));
+    }
+    await releaseHold(admin, listing.id, hold);
+    return { ok: false, status: 500, error: START_ERROR };
   }
 
   const { error: attachError } = await admin.rpc("attach_hold_session", {
