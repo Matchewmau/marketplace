@@ -41,6 +41,8 @@ export function CategoryNav({
     nav.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
   }, [currentCategory, isStrip]);
 
+  const allListingsActive = !currentCategory && pathname === "/";
+
   return (
     <nav
       ref={navRef}
@@ -51,6 +53,14 @@ export function CategoryNav({
           : "flex flex-col gap-0.5",
       )}
     >
+      <Link
+        href="/"
+        ref={allListingsActive ? activeRef : undefined}
+        aria-current={allListingsActive ? "page" : undefined}
+        className={navItemClassName(isStrip, allListingsActive)}
+      >
+        All listings
+      </Link>
       {CATEGORIES.map((category) => {
         const active = currentCategory === category.slug;
 
@@ -60,21 +70,25 @@ export function CategoryNav({
             ref={active ? activeRef : undefined}
             href={`/category/${category.slug}`}
             aria-current={active ? "page" : undefined}
-            className={cn(
-              "text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40",
-              isStrip
-                ? "whitespace-nowrap rounded-full border border-transparent bg-gray-100 px-3.5 py-1.5 text-gray-600 hover:bg-gray-200"
-                : "rounded-lg px-2.5 py-2 text-gray-600 hover:bg-gray-100",
-              active &&
-                (isStrip
-                  ? "border-[#B8D8FF] bg-[#E7F3FF] font-semibold text-[#1877F2] hover:bg-[#E7F3FF]"
-                  : "bg-[#E7F3FF] font-semibold text-[#1877F2] hover:bg-[#E7F3FF]"),
-            )}
+            className={navItemClassName(isStrip, active)}
           >
             {category.name}
           </Link>
         );
       })}
     </nav>
+  );
+}
+
+function navItemClassName(isStrip: boolean, active: boolean) {
+  return cn(
+    "text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40",
+    isStrip
+      ? "whitespace-nowrap rounded-full border border-transparent bg-gray-100 px-3.5 py-1.5 text-gray-600 hover:bg-gray-200"
+      : "rounded-lg px-2.5 py-2 text-gray-600 hover:bg-gray-100",
+    active &&
+      (isStrip
+        ? "border-[#B8D8FF] bg-[#E7F3FF] font-semibold text-[#1877F2] hover:bg-[#E7F3FF]"
+        : "bg-[#E7F3FF] font-semibold text-[#1877F2] hover:bg-[#E7F3FF]"),
   );
 }
