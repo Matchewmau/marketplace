@@ -1,6 +1,6 @@
 -- Sample listings: 24 items from four demo sellers across 12 categories.
 -- Optional. Safe to re-run: existing ids are skipped.
--- To try Buy now locally, open Get paid and connect one of the demo seller emails.
+-- To try Buy Now locally, open Get paid and connect one of the demo seller emails.
 insert into public.listings (id, title, description, price, category, condition, seller_email, image_url, location, created_at)
 values
   ('a0000000-0000-4000-8000-000000000001', 'MacBook Pro 14-inch (M3 Pro, 18GB, 512GB)', 'Bought last year, battery cycle count under 120. No scratches or dents. Comes with the original 70W charger and box. Factory reset and ready to go.', 890.00, 'Electronics', 'Used - Like New', 'demo.seller1@example.com', 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=1200&q=80', 'Palo Alto, CA', now() - interval '3 hours'),
