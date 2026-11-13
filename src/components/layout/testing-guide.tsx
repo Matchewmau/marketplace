@@ -446,9 +446,9 @@ export function TestingGuideButton({
         onClick={(event) => {
           if (event.target === dialogRef.current) closeDialog();
         }}
-        className="m-auto max-h-[min(88vh,760px)] w-[calc(100%-1.5rem)] max-w-xl overflow-hidden rounded-2xl bg-white p-0 text-gray-900 shadow-2xl backdrop:bg-black/50 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+        className="m-auto h-[min(85vh,640px)] supports-[height:100dvh]:h-[min(85dvh,640px)] w-[calc(100%-1.5rem)] max-w-xl overflow-hidden rounded-2xl bg-white p-0 text-gray-900 shadow-2xl backdrop:bg-black/50 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
       >
-        <div className="flex max-h-[inherit] flex-col">
+        <div className="flex h-full flex-col">
           <div className="shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand">
