@@ -32,7 +32,7 @@ in a Stripe **sandbox** only.
 - “Your listings” view scoped to the email saved in this browser.
 - Seller payouts with Stripe Connect: sellers onboard at `/seller/payments`
   (“Get paid” in the header) using their seller email.
-- “Buy now” on listing pages, with a clear reason when it is disabled (seller
+- “Buy Now” on listing pages, with a clear reason when it is disabled (seller
   not set up, free item, below $0.50 or above the online limit, sold, or
   reserved by another buyer).
 - Stripe-hosted Checkout using destination charges: the payment goes to the
@@ -99,7 +99,7 @@ Stripe variables (all server-only):
 | `STRIPE_WEBHOOK_SECRET` | Signing secret (`whsec_…`) for the webhook endpoint. Required by `/api/stripe/webhook`. |
 | `PLATFORM_FEE_BPS` | Optional platform fee in basis points, `0`–`10000`. Defaults to `1000` (10%). `0` turns the fee off. The Get paid page shows the fee to sellers. |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Set as the assignment asks. Not used by the app, because Checkout is a hosted redirect. |
-| `APP_URL` | Origin used for Stripe onboarding return URLs and as the fallback for Checkout returns. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, set it to the production URL (recommended); if unset, the request origin is used. Checkout returns buyers to the origin they clicked Buy now on when that origin is one of the app's known origins (the request origin, `APP_URL`, or the Vercel deployment URLs), otherwise to `APP_URL`. When self-hosting behind a proxy, set `APP_URL` to the public URL. |
+| `APP_URL` | Origin used for Stripe onboarding return URLs and as the fallback for Checkout returns. Set it to `https://localhost:3000` for local HTTPS dev. On Vercel, set it to the production URL (recommended); if unset, the request origin is used. Checkout returns buyers to the origin they clicked Buy Now on when that origin is one of the app's known origins (the request origin, `APP_URL`, or the Vercel deployment URLs), otherwise to `APP_URL`. When self-hosting behind a proxy, set `APP_URL` to the public URL. |
 | `APP_SCOPE` | Optional unique id for this environment: a letter or digit first, then letters, digits, `.`, `_`, `:`, `-`, at most 100 characters. Lowercased and stored as `env:<value>`. Defaults to the Supabase project host. Required when `NEXT_PUBLIC_SUPABASE_URL` is a local Supabase (`localhost`, `127.0.0.1`, …) so environments sharing one Stripe sandbox never handle each other's checkouts; without it checkout is disabled. An invalid value disables checkout and makes the webhook return `503` until it is fixed. |
 
 The Stripe publishable key is not needed because the app uses Stripe-hosted
@@ -124,7 +124,7 @@ The migration creates:
 
 The seed inserts 24 sample listings from four demo sellers
 (`demo.seller1@example.com` to `demo.seller4@example.com`) across 12 categories.
-Buy now stays off for a demo seller's listings until you connect that email on
+Buy Now stays off for a demo seller's listings until you connect that email on
 the Get paid page. The seed is optional; the app works with an empty database.
 
 The Stripe Connect migration adds listing status, the `seller_accounts`,
@@ -199,15 +199,15 @@ A resent event for a listing that has since been sold is refunded automatically.
 ### Try the full flow
 
 1. Create a listing with your seller email (price of at least $0.50).
-2. Open the listing. “Buy now” is disabled because the seller has not set up
+2. Open the listing. “Buy Now” is disabled because the seller has not set up
    payments.
 3. Click “Get paid” in the header and enter the same email.
-4. Click “Set up payouts with Stripe” and complete Stripe's test onboarding.
+4. Click “Connect with Stripe” and complete Stripe's test onboarding.
    Test values: phone `000 000 0000`, SMS code `000000`, SSN last 4 / ID
    `0000` or `000-00-0000`, address line `address_full_match`, routing number
    `110000000`, account number `000123456789`.
 5. Back on Get paid, the status flags show “Yes”.
-6. Open the listing in another browser and click “Buy now”.
+6. Open the listing in another browser and click “Buy Now”.
 7. Pay with `4242 4242 4242 4242`, any future expiry, and any CVC.
 8. You land on “Order confirmed”. There is now an `orders` row in Supabase, the
    listing shows “Sold”, and the transfer is visible in the Stripe Dashboard.
@@ -314,7 +314,7 @@ All are executable by `service_role` only.
 Validation errors return `{ error: string }` with status `400`. Storage or
 database failures return `500`.
 
-The hold token never appears in a URL. “Buy now” keeps it in `sessionStorage`
+The hold token never appears in a URL. “Buy Now” keeps it in `sessionStorage`
 (`hold:<listingId>`); Stripe's cancel URL is `/checkout/cancel?listing=<id>`,
 and that page posts the saved token to `/api/checkout/cancel` from the browser.
 

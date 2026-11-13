@@ -13,8 +13,8 @@ export type GuideValue = {
 
 export const QUICK_START: string[] = [
   "Create a listing with your email (price $0.50 or more).",
-  "Open Get paid, enter the same email, and set up payouts using the Stripe test values below.",
-  "Open the listing in a private window or another browser and click Buy now.",
+  "Open Get paid, enter the same email, click Connect with Stripe, and use the Stripe test values below.",
+  "Open the listing in a private window or another browser and click Buy Now.",
   "Pay with a test card. You'll see “Order confirmed” and the item is marked Sold.",
 ];
 

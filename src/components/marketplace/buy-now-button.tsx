@@ -47,7 +47,7 @@ export function BuyNowButton({ listingId, purchase }: BuyNowButtonProps) {
           aria-describedby={reasonId}
           className="w-full"
         >
-          Buy now
+          Buy Now
         </Button>
         <p id={reasonId} className="mt-2 text-sm text-gray-500">
           {PURCHASE_REASON_TEXT[purchase.reason]}
@@ -128,7 +128,7 @@ export function BuyNowButton({ listingId, purchase }: BuyNowButtonProps) {
         className="w-full bg-brand-strong text-white hover:bg-brand-hover"
       >
         <CreditCard className="mr-2 h-4 w-4" aria-hidden="true" />
-        {pending ? "Redirecting to checkout…" : "Buy now"}
+        {pending ? "Redirecting to checkout…" : "Buy Now"}
       </Button>
       {error && (
         <p role="alert" className="mt-2 text-sm text-red-600">

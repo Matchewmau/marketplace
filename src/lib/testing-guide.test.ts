@@ -64,4 +64,10 @@ describe("testing guide data", () => {
     expect(QUICK_START).toHaveLength(4);
     expect(TESTING_TIPS).toHaveLength(4);
   });
+
+  it("uses the assignment's button wording", () => {
+    const steps = QUICK_START.join(" ");
+    expect(steps).toContain("Buy Now");
+    expect(steps).toContain("Connect with Stripe");
+  });
 });

@@ -391,7 +391,7 @@ export function SellerPaymentsPanel({
                     You&apos;re all set
                   </h2>
                   <p className="text-sm text-gray-700">
-                    Buyers can pay for your listings with Buy now, and the money
+                    Buyers can pay for your listings with Buy Now, and the money
                     goes to your Stripe account.
                   </p>
                 </div>
@@ -494,7 +494,7 @@ export function SellerPaymentsPanel({
                   {onboardPending
                     ? "Working…"
                     : state === "not_connected"
-                      ? "Set up payouts with Stripe"
+                      ? "Connect with Stripe"
                       : "Continue setup"}
                 </Button>
               )}
