@@ -280,7 +280,7 @@ export function CreateListingForm({
               event.preventDefault();
               choosePhoto(event.dataTransfer.files?.[0] ?? null);
             }}
-            className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition-colors hover:border-[#1877F2] hover:bg-blue-50/40"
+            className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition-colors hover:border-brand hover:bg-blue-50/40"
           >
             <ImagePlus className="h-8 w-8 text-gray-400" />
             <span className="mt-2 max-w-full truncate text-sm font-medium text-gray-700">
@@ -439,7 +439,7 @@ export function CreateListingForm({
           <Button
             type="submit"
             disabled={!photo || submitting}
-            className="bg-[#1877F2] text-white hover:bg-[#166FE5]"
+            className="bg-brand-strong text-white hover:bg-brand-hover"
           >
             {submitting ? "Publishing…" : "Publish"}
           </Button>

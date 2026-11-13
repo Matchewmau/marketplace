@@ -119,7 +119,7 @@ export function MessageSellerForm({ listingId }: MessageSellerFormProps) {
       <Button
         type="submit"
         disabled={sending}
-        className="w-full bg-[#1877F2] text-white hover:bg-[#166FE5]"
+        className="w-full bg-brand-strong text-white hover:bg-brand-hover"
       >
         {sending ? "Sending…" : "Send Message"}
       </Button>

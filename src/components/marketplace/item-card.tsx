@@ -13,7 +13,7 @@ export function ItemCard({ listing }: ItemCardProps) {
   return (
     <Link
       href={`/item/${listing.id}`}
-      className="group block overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.03] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+      className="group block overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.03] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
     >
       <div className="relative aspect-square overflow-hidden bg-gray-100">
         <ImageWithFallback

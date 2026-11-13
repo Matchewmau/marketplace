@@ -73,7 +73,7 @@ export function ItemGrid({
         </p>
         <Button
           asChild
-          className="mt-4 bg-[#1877F2] text-white hover:bg-[#166FE5]"
+          className="mt-4 bg-brand-strong text-white hover:bg-brand-hover"
         >
           <Link href="/create">Create the first listing</Link>
         </Button>

@@ -48,7 +48,7 @@ function Panel({
           )}
           <Link
             href="/"
-            className="inline-flex h-9 items-center justify-center rounded-md bg-[#1877F2] px-4 text-sm font-medium text-white transition-colors hover:bg-[#166FE5]"
+            className="inline-flex h-9 items-center justify-center rounded-md bg-brand-strong px-4 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
           >
             Back to Marketplace
           </Link>

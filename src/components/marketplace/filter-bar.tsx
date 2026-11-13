@@ -60,7 +60,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
         aria-expanded={expanded}
         aria-controls={fieldsId}
         onClick={() => setExpanded((open) => !open)}
-        className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-sm font-semibold text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40 sm:hidden"
+        className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-sm font-semibold text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:hidden"
       >
         <SlidersHorizontal className="size-4" aria-hidden="true" />
         Filters
@@ -68,7 +68,7 @@ export function FilterBar({ filters, onChange, onClear }: FilterBarProps) {
           <>
             <span
               aria-hidden="true"
-              className="rounded-full bg-[#E7F3FF] px-2 py-0.5 text-xs font-semibold text-[#1877F2]"
+              className="rounded-full bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-ink"
             >
               {activeCount}
             </span>

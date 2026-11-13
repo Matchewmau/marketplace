@@ -55,6 +55,13 @@ const config: Config = {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        brand: {
+          DEFAULT: "#1877F2",
+          strong: "#166FE5",
+          hover: "#1464D2",
+          ink: "#0B5CD5",
+          soft: "#E7F3FF",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

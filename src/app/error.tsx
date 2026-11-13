@@ -18,7 +18,7 @@ export default function ErrorPage({ reset }: ErrorPageProps) {
         <button
           type="button"
           onClick={reset}
-          className="mt-6 inline-flex h-9 items-center justify-center rounded-md bg-[#1877F2] px-4 text-sm font-medium text-white transition-colors hover:bg-[#166FE5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2] focus-visible:ring-offset-2"
+          className="mt-6 inline-flex h-9 items-center justify-center rounded-md bg-brand-strong px-4 text-sm font-medium text-white transition-colors hover:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
         >
           Try again
         </button>

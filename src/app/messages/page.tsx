@@ -221,7 +221,7 @@ export default function MessagesPage() {
           </div>
           <Button
             type="submit"
-            className="bg-[#166FE5] text-white hover:bg-[#0F5BBF]"
+            className="bg-brand-strong text-white hover:bg-brand-hover"
           >
             View messages
           </Button>
@@ -290,7 +290,7 @@ export default function MessagesPage() {
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             <Button
               asChild
-              className="bg-[#166FE5] text-white hover:bg-[#0F5BBF]"
+              className="bg-brand-strong text-white hover:bg-brand-hover"
             >
               <Link href="/your-listings">View your listings</Link>
             </Button>
@@ -319,7 +319,7 @@ export default function MessagesPage() {
                 <div className="min-w-0 flex-1">
                   <Link
                     href={`/item/${group.listingId}`}
-                    className="block truncate font-medium text-gray-800 transition-colors hover:text-[#166FE5] hover:underline"
+                    className="block truncate font-medium text-gray-800 transition-colors hover:text-brand-hover hover:underline"
                   >
                     {group.listingTitle}
                   </Link>
@@ -337,7 +337,7 @@ export default function MessagesPage() {
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                       <a
                         href={`mailto:${message.buyer_email}`}
-                        className="break-all text-sm font-medium text-[#166FE5] hover:underline"
+                        className="break-all text-sm font-medium text-brand-ink hover:underline"
                       >
                         {message.buyer_email}
                       </a>

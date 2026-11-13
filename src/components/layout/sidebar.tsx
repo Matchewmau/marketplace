@@ -45,9 +45,9 @@ export function Sidebar({ activeCategory }: SidebarProps) {
                 href={link.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "rounded-lg px-2.5 py-2 text-sm text-gray-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40",
+                  "rounded-lg px-2.5 py-2 text-sm text-gray-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
                   active
-                    ? "bg-[#E7F3FF] font-semibold text-[#1877F2] hover:bg-[#E7F3FF]"
+                    ? "bg-brand-soft font-semibold text-brand-ink hover:bg-brand-soft"
                     : "hover:bg-gray-100",
                 )}
               >
@@ -66,7 +66,7 @@ export function Sidebar({ activeCategory }: SidebarProps) {
       <div className="min-w-0 rounded-lg bg-white p-3 shadow-sm lg:hidden">
         <Button
           asChild
-          className="w-full bg-[#1877F2] text-white hover:bg-[#166FE5]"
+          className="w-full bg-brand-strong text-white hover:bg-brand-hover"
         >
           <Link href="/create">Create new listing</Link>
         </Button>

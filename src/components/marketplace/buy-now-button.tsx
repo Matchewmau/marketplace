@@ -125,7 +125,7 @@ export function BuyNowButton({ listingId, purchase }: BuyNowButtonProps) {
         type="button"
         onClick={handleClick}
         disabled={pending}
-        className="w-full bg-[#1877F2] text-white hover:bg-[#166FE5]"
+        className="w-full bg-brand-strong text-white hover:bg-brand-hover"
       >
         <CreditCard className="mr-2 h-4 w-4" aria-hidden="true" />
         {pending ? "Redirecting to checkout…" : "Buy now"}

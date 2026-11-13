@@ -66,7 +66,7 @@ export default function YourListingsPage() {
             Want buyers to pay online?{" "}
             <Link
               href="/seller/payments"
-              className="font-medium text-[#1877F2] hover:underline"
+              className="font-medium text-brand-ink hover:underline"
             >
               Set up payouts
             </Link>
@@ -89,7 +89,7 @@ export default function YourListingsPage() {
             </div>
             <Button
               type="submit"
-              className="bg-[#1877F2] text-white hover:bg-[#166FE5]"
+              className="bg-brand-strong text-white hover:bg-brand-hover"
             >
               View my listings
             </Button>

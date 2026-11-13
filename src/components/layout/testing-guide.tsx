@@ -35,7 +35,7 @@ function GuideRow({
             <button
               type="button"
               onClick={() => onCopy(item)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-[#1877F2] hover:bg-[#E7F3FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-brand-ink hover:bg-brand-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
               {state === "copied" ? (
                 <Check className="h-3.5 w-3.5" aria-hidden="true" />
@@ -148,7 +148,7 @@ export function TestingGuideButton({
           title="How to test payments"
           aria-haspopup="dialog"
           onClick={openDialog}
-          className="flex h-11 w-11 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+          className="flex h-11 w-11 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           <CircleHelp className="h-5 w-5" aria-hidden="true" />
         </button>
@@ -157,7 +157,7 @@ export function TestingGuideButton({
           type="button"
           aria-haspopup="dialog"
           onClick={openDialog}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm font-medium text-[#1877F2] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm font-medium text-brand-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           <CircleHelp className="h-4 w-4" aria-hidden="true" />
           How to test payments
@@ -191,7 +191,7 @@ export function TestingGuideButton({
               type="button"
               aria-label="Close"
               onClick={() => dialogRef.current?.close()}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </button>

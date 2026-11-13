@@ -132,7 +132,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
         </p>
         <Button
           asChild
-          className="mt-6 bg-[#1877F2] text-white hover:bg-[#166FE5]"
+          className="mt-6 bg-brand-strong text-white hover:bg-brand-hover"
         >
           <Link href="/">Back to Marketplace</Link>
         </Button>
@@ -158,7 +158,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
           aria-label={`View ${listing.title} full screen`}
           aria-haspopup="dialog"
           onClick={() => setLightboxOpen(true)}
-          className="group relative block aspect-[4/3] w-full cursor-zoom-in overflow-hidden rounded-lg bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/50 focus-visible:ring-offset-2"
+          className="group relative block aspect-[4/3] w-full cursor-zoom-in overflow-hidden rounded-lg bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
         >
           <ImageWithFallback
             src={listing.image_url}
@@ -213,7 +213,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
             </h2>
             <a
               href={`mailto:${listing.seller_email}`}
-              className="mt-2 inline-flex items-center gap-2 break-all text-sm font-medium text-[#1877F2] hover:underline"
+              className="mt-2 inline-flex items-center gap-2 break-all text-sm font-medium text-brand-ink hover:underline"
             >
               <Mail className="h-4 w-4 shrink-0" />
               {listing.seller_email}

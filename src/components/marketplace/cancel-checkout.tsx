@@ -92,7 +92,7 @@ export function CancelCheckout({ listingId }: { listingId: string | null }) {
         </p>
         <Link
           href={listingId ? `/item/${listingId}` : "/"}
-          className="mt-6 inline-flex h-9 items-center justify-center rounded-md bg-[#1877F2] px-4 text-sm font-medium text-white transition-colors hover:bg-[#166FE5]"
+          className="mt-6 inline-flex h-9 items-center justify-center rounded-md bg-brand-strong px-4 text-sm font-medium text-white transition-colors hover:bg-brand-hover"
         >
           {listingId ? (state === "already_paid" ? "View item" : "Back to item") : "Back to Marketplace"}
         </Link>

@@ -51,7 +51,7 @@ function formatConnectedAt(value: string | null): string {
 const BADGE_STYLES = {
   gray: "bg-gray-100 text-gray-700",
   amber: "bg-amber-100 text-amber-800",
-  blue: "bg-[#E7F3FF] text-[#0B5CD5]",
+  blue: "bg-brand-soft text-brand-ink",
   green: "bg-green-100 text-green-800",
 } as const;
 
@@ -113,9 +113,9 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 const PRIMARY_BUTTON =
-  "h-11 w-full bg-[#1877F2] px-4 text-white hover:bg-[#166FE5] focus-visible:ring-2 focus-visible:ring-[#1877F2]/40 sm:w-auto";
+  "h-11 w-full bg-brand-strong px-4 text-white hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand sm:w-auto";
 const SECONDARY_BUTTON =
-  "h-11 w-full px-4 focus-visible:ring-2 focus-visible:ring-[#1877F2]/40 sm:w-auto";
+  "h-11 w-full px-4 focus-visible:ring-2 focus-visible:ring-brand sm:w-auto";
 
 export function SellerPaymentsPanel() {
   const searchParams = useSearchParams();

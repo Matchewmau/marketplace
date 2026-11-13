@@ -50,12 +50,12 @@ export default function CreatePage() {
               <Link
                 key={listingType.type}
                 href={`/create/item?type=${listingType.type}`}
-                className="group rounded-xl bg-white p-6 shadow-sm ring-1 ring-black/[0.03] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+                className="group rounded-xl bg-white p-6 shadow-sm ring-1 ring-black/[0.03] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               >
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-[#1877F2]">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-brand-ink">
                   <Icon className="h-6 w-6" />
                 </span>
-                <h2 className="mt-4 text-lg font-semibold text-gray-800 transition-colors group-hover:text-[#1877F2]">
+                <h2 className="mt-4 text-lg font-semibold text-gray-800 transition-colors group-hover:text-brand-ink">
                   {listingType.title}
                 </h2>
                 <p className="mt-1 text-sm text-gray-600">

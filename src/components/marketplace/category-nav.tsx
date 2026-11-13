@@ -82,13 +82,13 @@ export function CategoryNav({
 
 function navItemClassName(isStrip: boolean, active: boolean) {
   return cn(
-    "text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40",
+    "text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
     isStrip
       ? "whitespace-nowrap rounded-full border border-transparent bg-gray-100 px-3.5 py-1.5 text-gray-600 hover:bg-gray-200"
       : "rounded-lg px-2.5 py-2 text-gray-600 hover:bg-gray-100",
     active &&
       (isStrip
-        ? "border-[#B8D8FF] bg-[#E7F3FF] font-semibold text-[#1877F2] hover:bg-[#E7F3FF]"
-        : "bg-[#E7F3FF] font-semibold text-[#1877F2] hover:bg-[#E7F3FF]"),
+        ? "border-[#B8D8FF] bg-brand-soft font-semibold text-brand-ink hover:bg-brand-soft"
+        : "bg-brand-soft font-semibold text-brand-ink hover:bg-brand-soft"),
   );
 }

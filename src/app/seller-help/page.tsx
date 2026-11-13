@@ -55,7 +55,7 @@ export default function SellerHelpPage() {
 
             return (
               <li key={tip.title} className="flex gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[#1877F2]">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-50 text-brand-ink">
                   <Icon className="h-5 w-5" />
                 </span>
                 <div>
@@ -85,7 +85,7 @@ export default function SellerHelpPage() {
         <div className="mt-6 flex flex-wrap gap-3">
           <Button
             asChild
-            className="bg-[#1877F2] text-white hover:bg-[#166FE5]"
+            className="bg-brand-strong text-white hover:bg-brand-hover"
           >
             <Link href="/create">Create a listing</Link>
           </Button>

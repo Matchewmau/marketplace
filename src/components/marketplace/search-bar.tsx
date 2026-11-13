@@ -31,7 +31,7 @@ export function SearchBar({ value, onChange, onSubmit }: SearchBarProps) {
       </div>
       <Button
         type="submit"
-        className="h-10 bg-[#1877F2] px-5 text-white hover:bg-[#166FE5]"
+        className="h-10 bg-brand-strong px-5 text-white hover:bg-brand-hover"
       >
         Search
       </Button>

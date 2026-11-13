@@ -33,9 +33,9 @@ export function HeaderNavLink({
       title={label}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex h-11 min-w-11 items-center justify-center gap-2 rounded-full text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40 lg:px-3",
+        "flex h-11 min-w-11 items-center justify-center gap-2 rounded-full text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:px-3",
         active
-          ? "bg-[#E7F3FF] text-[#1877F2]"
+          ? "bg-brand-soft text-brand-ink"
           : "text-gray-600 hover:bg-gray-100",
       )}
     >
