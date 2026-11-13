@@ -138,9 +138,11 @@ the SQL editor. It should return `ALL CHECKS PASSED` and leaves no data behind.
 ### Stripe sandbox setup
 
 1. Create or open a Stripe account and switch to a **sandbox**.
-2. In the Dashboard, open Connect and complete the platform setup. Choose a
-   marketplace where the platform collects payments and is responsible for
-   losses.
+2. In the Dashboard, open Connect and complete the platform setup as a
+   marketplace where the platform collects payments. The app's seller
+   accounts make Stripe liable for losses, so the platform doesn't need to
+   accept loss liability. This also lets the app run on the shared assignment
+   sandbox, where you have no Dashboard access.
 3. Make sure Accounts v2 is available for the sandbox (the app creates
    seller accounts through the v2 API). Sellers get Stripe-liable accounts
    with the full Stripe Dashboard (merchant + recipient configurations),

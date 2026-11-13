@@ -145,7 +145,7 @@ describe("normalizeAccountStatus", () => {
 });
 
 describe("createSellerAccount", () => {
-  it("creates an express recipient account and returns its id and flags", async () => {
+  it("creates a Stripe-liable full-dashboard seller account and returns its id and flags", async () => {
     const create = vi.fn().mockResolvedValue({ id: "acct_new_1" });
     const stripe = { v2: { core: { accounts: { create } } } } as unknown as Stripe;
 
