@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Mail, Maximize2 } from "lucide-react";
+import { Mail, Maximize2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { ImageLightbox } from "@/components/marketplace/image-lightbox";
 import { ImageWithFallback } from "@/components/marketplace/image-with-fallback";
 import { BuyNowButton } from "@/components/marketplace/buy-now-button";
@@ -144,13 +145,7 @@ export function ListingDetail({ listingId }: ListingDetailProps) {
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Marketplace
-      </Link>
+      <BackLink />
 
       <div className="grid gap-6 rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03] lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-8 lg:p-6">
         <button

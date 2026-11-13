@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { Sidebar } from "@/components/layout/sidebar";
 import { ListingBrowser } from "@/components/marketplace/listing-browser";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,7 @@ export default function YourListingsPage() {
     <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-6">
       <Sidebar />
       <div className="min-w-0 space-y-4">
+        <BackLink />
         <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03]">
           <p className="text-sm text-gray-600">
             Your listings are tied to the email you use when posting. This

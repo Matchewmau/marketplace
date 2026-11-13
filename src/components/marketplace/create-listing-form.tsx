@@ -4,6 +4,7 @@ import { ImagePlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -260,6 +261,7 @@ export function CreateListingForm({
         noValidate
         className="min-w-0 space-y-5 rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03] sm:p-6"
       >
+        <BackLink href="/create">Back to listing types</BackLink>
         <h1 className="text-2xl font-semibold text-gray-800">Create listing</h1>
 
         {bannerError ? (

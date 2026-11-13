@@ -1,12 +1,7 @@
 import Link from "next/link";
-import {
-  ArrowLeft,
-  Camera,
-  CircleDollarSign,
-  ClipboardList,
-  Mail,
-} from "lucide-react";
+import { Camera, CircleDollarSign, ClipboardList, Mail } from "lucide-react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { Button } from "@/components/ui/button";
 
 const TIPS = [
@@ -35,13 +30,7 @@ const TIPS = [
 export default function SellerHelpPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Marketplace
-      </Link>
+      <BackLink />
 
       <div className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-black/[0.03]">
         <h1 className="text-2xl font-semibold text-gray-800">Seller help</h1>

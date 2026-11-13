@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Inbox } from "lucide-react";
+import { Inbox } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { ImageWithFallback } from "@/components/marketplace/image-with-fallback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -178,13 +179,7 @@ export default function MessagesPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <Link
-        href="/"
-        className="inline-flex items-center gap-1 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Marketplace
-      </Link>
+      <BackLink />
 
       <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-black/[0.03] sm:p-6">
         <h1 className="text-2xl font-semibold text-gray-800">Messages</h1>

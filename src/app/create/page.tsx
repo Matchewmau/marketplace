@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Car, Home, Layers, Tag } from "lucide-react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { Sidebar } from "@/components/layout/sidebar";
 
 const LISTING_TYPES = [
@@ -35,6 +36,7 @@ export default function CreatePage() {
     <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-6">
       <Sidebar />
       <section className="min-w-0">
+        <BackLink />
         <h1 className="text-2xl font-semibold text-gray-800">
           Choose listing type
         </h1>

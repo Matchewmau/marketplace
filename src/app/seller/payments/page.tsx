@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { Suspense } from "react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { SellerPaymentsPanel } from "@/components/marketplace/seller-payments-panel";
 
 export const metadata: Metadata = {
@@ -12,13 +11,7 @@ export const metadata: Metadata = {
 export default function SellerPaymentsPage() {
   return (
     <div className="mx-auto max-w-xl space-y-4">
-      <Link
-        href="/"
-        className="-ml-1 inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-      >
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        Back to Marketplace
-      </Link>
+      <BackLink />
       <div>
         <h1 className="text-2xl font-semibold text-gray-800">Get paid</h1>
         <p className="mt-1 text-sm text-gray-600">
