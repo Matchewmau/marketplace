@@ -523,6 +523,7 @@ export function TestingGuideButton({
           </div>
 
           <div
+            key={activeTab}
             role="tabpanel"
             id={panelId(activeTab)}
             aria-labelledby={tabId(activeTab)}
