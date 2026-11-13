@@ -12,13 +12,15 @@ import {
   type GuideValue,
 } from "@/lib/testing-guide";
 
+type CopyState = "idle" | "copied" | "failed";
+
 function GuideRow({
   item,
-  copied,
+  state,
   onCopy,
 }: {
   item: GuideValue;
-  copied: boolean;
+  state: CopyState;
   onCopy: (item: GuideValue) => void;
 }) {
   return (
@@ -35,12 +37,16 @@ function GuideRow({
               onClick={() => onCopy(item)}
               className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-[#1877F2] hover:bg-[#E7F3FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
             >
-              {copied ? (
+              {state === "copied" ? (
                 <Check className="h-3.5 w-3.5" aria-hidden="true" />
               ) : (
                 <Copy className="h-3.5 w-3.5" aria-hidden="true" />
               )}
-              {copied ? "Copied" : "Copy"}
+              {state === "copied"
+                ? "Copied"
+                : state === "failed"
+                  ? "Copy failed"
+                  : "Copy"}
               <span className="sr-only"> {item.label}</span>
             </button>
           ) : null}
@@ -56,12 +62,12 @@ function GuideRow({
 function GuideSection({
   title,
   items,
-  copiedKey,
+  feedback,
   onCopy,
 }: {
   title: string;
   items: GuideValue[];
-  copiedKey: string | null;
+  feedback: { key: string; state: CopyState } | null;
   onCopy: (item: GuideValue) => void;
 }) {
   return (
@@ -72,7 +78,7 @@ function GuideSection({
           <GuideRow
             key={item.label}
             item={item}
-            copied={copiedKey === item.label}
+            state={feedback?.key === item.label ? feedback.state : "idle"}
             onCopy={onCopy}
           />
         ))}
@@ -89,7 +95,10 @@ export function TestingGuideButton({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    key: string;
+    state: CopyState;
+  } | null>(null);
   const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
@@ -103,12 +112,17 @@ export function TestingGuideButton({
     if (dialog && !dialog.open) dialog.showModal();
   }
 
-  function announce(message: string, key: string | null, durationMs: number) {
-    setCopiedKey(key);
+  function announce(
+    message: string,
+    key: string,
+    state: CopyState,
+    durationMs: number,
+  ) {
+    setFeedback({ key, state });
     setAnnouncement(message);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      setCopiedKey(null);
+      setFeedback(null);
       setAnnouncement("");
     }, durationMs);
   }
@@ -119,10 +133,10 @@ export function TestingGuideButton({
       if (!navigator.clipboard) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(item.copy);
     } catch {
-      announce("Copy failed — select the text instead", null, 3000);
+      announce(`Copy failed for ${item.label}`, item.label, "failed", 3000);
       return;
     }
-    announce(`Copied ${item.label}`, item.label, 1500);
+    announce(`Copied ${item.label}`, item.label, "copied", 1500);
   }
 
   return (
@@ -143,7 +157,7 @@ export function TestingGuideButton({
           type="button"
           aria-haspopup="dialog"
           onClick={openDialog}
-          className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-[#1877F2] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm font-medium text-[#1877F2] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
         >
           <CircleHelp className="h-4 w-4" aria-hidden="true" />
           How to test payments
@@ -177,7 +191,7 @@ export function TestingGuideButton({
               type="button"
               aria-label="Close"
               onClick={() => dialogRef.current?.close()}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2]/40"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
@@ -195,13 +209,13 @@ export function TestingGuideButton({
           <GuideSection
             title="Test cards"
             items={TEST_CARDS}
-            copiedKey={copiedKey}
+            feedback={feedback}
             onCopy={handleCopy}
           />
           <GuideSection
             title="Seller onboarding (Stripe test data)"
             items={ONBOARDING_VALUES}
-            copiedKey={copiedKey}
+            feedback={feedback}
             onCopy={handleCopy}
           />
 
@@ -214,12 +228,7 @@ export function TestingGuideButton({
             </ul>
           </section>
 
-          <div
-            aria-live="polite"
-            className={
-              announcement && !copiedKey ? "mt-4 text-sm text-red-600" : "sr-only"
-            }
-          >
+          <div aria-live="polite" className="sr-only">
             {announcement}
           </div>
         </div>

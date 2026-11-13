@@ -72,11 +72,13 @@ export async function GET(request: Request) {
   }
 
   try {
+    // Start the count alongside the refresh; it never rejects, and is discarded when there is no status.
+    const activeListingsPromise = countActiveListings(admin, email);
     const status = await refreshSellerAccount(stripe, admin, email);
     if (!status) {
       return NextResponse.json({ status: null }, { headers: NO_STORE });
     }
-    const activeListings = await countActiveListings(admin, email);
+    const activeListings = await activeListingsPromise;
     return NextResponse.json(
       {
         status: toPublicSellerStatus(

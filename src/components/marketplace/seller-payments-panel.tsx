@@ -51,7 +51,7 @@ function formatConnectedAt(value: string | null): string {
 const BADGE_STYLES = {
   gray: "bg-gray-100 text-gray-700",
   amber: "bg-amber-100 text-amber-800",
-  blue: "bg-[#E7F3FF] text-[#1877F2]",
+  blue: "bg-[#E7F3FF] text-[#0B5CD5]",
   green: "bg-green-100 text-green-800",
 } as const;
 
